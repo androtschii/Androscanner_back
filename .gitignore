@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Env / secrets
+.env
+*.db
+*.sqlite3
+
+# Scan artifacts
+scan_results/
+reports/
+*.xml
+
+# IDE / OS
+.idea/
+.vscode/
+Thumbs.db
+desktop.ini

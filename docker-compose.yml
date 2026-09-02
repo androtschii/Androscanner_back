@@ -1,0 +1,35 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: scanner
+      POSTGRES_PASSWORD: scanner
+      POSTGRES_DB: scanner
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scanner"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    # Redis понадобится для Celery в Фазе 3
+
+  api:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg://scanner:scanner@db:5432/scanner
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET: change_me_dev_secret
+      DEFAULT_ADMIN_USERNAME: admin
+      DEFAULT_ADMIN_PASSWORD: admin
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
