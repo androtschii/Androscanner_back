@@ -1,34 +1,13 @@
-import ipaddress
-
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.auth.deps import get_current_user, require_role
 from app.database import get_db
-from app.models import AllowedScope, AuditLog, Role, Scan, User
+from app.models import AuditLog, Role, Scan, User
 from app.schemas import ScanCreate, ScanOut
+from app.security.scope import assert_in_scope
 
 router = APIRouter(prefix="/scans", tags=["scans"])
-
-
-def target_in_scope(target: str, db: Session) -> bool:
-    """Проверяет, что цель попадает хотя бы в один разрешённый диапазон.
-
-    Это главная защита: скан вне allowed scope не запускается.
-    Поддерживает одиночный IP и CIDR-цель.
-    """
-    scopes = db.query(AllowedScope).all()
-    if not scopes:
-        return False
-    try:
-        target_net = ipaddress.ip_network(target, strict=False)
-    except ValueError:
-        return False
-    for scope in scopes:
-        allowed = ipaddress.ip_network(scope.cidr, strict=False)
-        if target_net.subnet_of(allowed):
-            return True
-    return False
 
 
 @router.get("", response_model=list[ScanOut])
@@ -56,11 +35,7 @@ def create_scan(
     user: User = Depends(get_current_user),
 ):
     """Запуск скана — admin и analyst. Viewer сюда не пройдёт (403)."""
-    if not target_in_scope(payload.target, db):
-        raise HTTPException(
-            status_code=403,
-            detail="Цель вне разрешённого диапазона (allowed scope)",
-        )
+    assert_in_scope(payload.target, db)
 
     scan = Scan(target=payload.target, profile=payload.profile, created_by=user.id)
     db.add(scan)

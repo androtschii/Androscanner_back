@@ -1,17 +1,29 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
+from alembic import command
+from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, scans, scopes, users
-from app.database import Base, SessionLocal, engine
+from app.api import audit, auth, scans, scopes, users
+from app.config import settings
+from app.database import SessionLocal
 from app.seed import seed_admin
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+
+def run_migrations() -> None:
+    """Накатывает миграции Alembic до последней версии (замена Base.metadata.create_all)."""
+    cfg = Config(str(BASE_DIR / "alembic.ini"))
+    cfg.set_main_option("script_location", str(BASE_DIR / "alembic"))
+    command.upgrade(cfg, "head")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # На старте: создаём таблицы (в проде замени на Alembic-миграции) и сидим админа
-    Base.metadata.create_all(bind=engine)
+    run_migrations()
     db = SessionLocal()
     try:
         seed_admin(db)
@@ -22,10 +34,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Network Scanner API", version="0.1.0", lifespan=lifespan)
 
-# CORS для фронтенда (в проде укажи конкретный домен вместо *)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -35,6 +46,7 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(scopes.router)
 app.include_router(scans.router)
+app.include_router(audit.router)
 
 
 @app.get("/health", tags=["system"])

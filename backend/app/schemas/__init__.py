@@ -53,4 +53,15 @@ class ScanOut(BaseModel):
     profile: ScanProfile
     status: ScanStatus
     created_by: int
+    result: str | None = None
+    created_at: datetime
+
+
+# ---- Audit ----
+class AuditLogOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    user_id: int | None
+    action: str
+    detail: str
     created_at: datetime
