@@ -10,11 +10,11 @@ from collections import Counter
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.analytics import diff_results
+from app.analytics import build_network_map, diff_results
 from app.auth.deps import get_current_user
 from app.database import get_db
-from app.models import Scan, ScanStatus, User
-from app.schemas import AnalyticsSummary, NamedCount, ScanDiff
+from app.models import AllowedScope, Scan, ScanStatus, User
+from app.schemas import AnalyticsSummary, NamedCount, NetworkMap, ScanDiff
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
@@ -113,3 +113,15 @@ def diff(
         compare=compare_scan,
         **diff_results(base_data, compare_data),
     )
+
+
+@router.get("/network", response_model=NetworkMap)
+def network(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    """Карта сети: все найденные хосты, разложенные по разрешённым диапазонам.
+
+    Это карта принадлежности, а не топология: профили сканирования не выясняют,
+    как устройства соединены между собой.
+    """
+    scans = db.query(Scan).all()
+    scopes = db.query(AllowedScope).all()
+    return build_network_map(scans, scopes)

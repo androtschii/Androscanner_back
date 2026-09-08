@@ -124,6 +124,36 @@ class ScanDiff(BaseModel):
     summary: DiffSummary
 
 
+# ---- Карта сети ----
+class NetworkHost(BaseModel):
+    ip: str
+    hostnames: list[str]
+    mac: str | None = None
+    vendor: str | None = None
+    os: str | None = None
+    open_ports: int
+    services: list[str]
+    last_seen: str
+
+
+class NetworkGroup(BaseModel):
+    cidr: str
+    description: str = ""
+    hosts: list[NetworkHost]
+
+
+class NetworkTotals(BaseModel):
+    hosts: int
+    networks: int
+    open_ports: int
+
+
+class NetworkMap(BaseModel):
+    networks: list[NetworkGroup]
+    ungrouped: list[NetworkHost]
+    totals: NetworkTotals
+
+
 # ---- Audit ----
 class AuditLogOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
