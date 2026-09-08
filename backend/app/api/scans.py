@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.auth.deps import get_current_user, require_role
@@ -6,6 +6,7 @@ from app.database import get_db
 from app.models import AuditLog, Role, Scan, User
 from app.schemas import ScanCreate, ScanOut
 from app.security.scope import assert_in_scope
+from app.tasks import dispatch_scan
 
 router = APIRouter(prefix="/scans", tags=["scans"])
 
@@ -31,6 +32,7 @@ def get_scan(scan_id: int, db: Session = Depends(get_db), _: User = Depends(get_
 )
 def create_scan(
     payload: ScanCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -42,7 +44,9 @@ def create_scan(
     db.add(AuditLog(user_id=user.id, action="create_scan", detail=payload.target))
     db.commit()
     db.refresh(scan)
-    # TODO (Фаза 3): здесь отправляем задачу в Celery: run_scan.delay(scan.id)
+
+    # Фаза 3 заменит диспетчер на Celery, тело задачи останется прежним
+    dispatch_scan(scan.id, background_tasks)
     return scan
 
 

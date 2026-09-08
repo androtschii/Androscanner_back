@@ -8,3 +8,5 @@ bcrypt==4.0.1
 pyjwt==2.10.1
 python-multipart==0.0.20
 alembic==1.19.1
+python-nmap==0.7.1
+scapy==2.7.0

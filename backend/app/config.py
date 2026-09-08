@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     # Redis (для Celery в следующих фазах)
     redis_url: str = "redis://redis:6379/0"
 
+    # Путь к nmap. Пусто = искать в PATH (так на Linux/в Docker).
+    # На Windows nmap ставится в Program Files и в PATH не попадает.
+    nmap_path: str = ""
+
     # CORS — домены фронтенда, которым разрешены запросы к API
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
