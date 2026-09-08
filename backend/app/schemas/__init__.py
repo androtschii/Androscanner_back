@@ -81,6 +81,49 @@ class AnalyticsSummary(BaseModel):
     top_ports: list[NamedCount]
 
 
+# ---- Сравнение сканов ----
+class PortBrief(BaseModel):
+    port: int
+    protocol: str
+    service: str = ""
+
+
+class HostWithPorts(BaseModel):
+    ip: str
+    ports: list[PortBrief]
+
+
+class ServiceChange(BaseModel):
+    port: int
+    protocol: str
+    before: str
+    after: str
+
+
+class HostChange(BaseModel):
+    ip: str
+    ports_opened: list[PortBrief]
+    ports_closed: list[PortBrief]
+    services_changed: list[ServiceChange]
+
+
+class DiffSummary(BaseModel):
+    hosts_added: int
+    hosts_removed: int
+    ports_opened: int
+    ports_closed: int
+    hosts_changed: int
+
+
+class ScanDiff(BaseModel):
+    base: ScanSummary
+    compare: ScanSummary
+    hosts_added: list[HostWithPorts]
+    hosts_removed: list[HostWithPorts]
+    host_changes: list[HostChange]
+    summary: DiffSummary
+
+
 # ---- Audit ----
 class AuditLogOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)

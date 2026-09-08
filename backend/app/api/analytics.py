@@ -7,17 +7,37 @@
 import json
 from collections import Counter
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app.analytics import diff_results
 from app.auth.deps import get_current_user
 from app.database import get_db
 from app.models import Scan, ScanStatus, User
-from app.schemas import AnalyticsSummary, NamedCount
+from app.schemas import AnalyticsSummary, NamedCount, ScanDiff
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 TOP_N = 8
+
+
+def _load_done_scan(scan_id: int, db: Session, role: str) -> tuple[Scan, dict]:
+    """Достаёт скан и разбирает его результат. Сравнивать можно только завершённые."""
+    scan = db.get(Scan, scan_id)
+    if scan is None:
+        raise HTTPException(status_code=404, detail=f"Скан {role} не найден")
+    if scan.status != ScanStatus.done or not scan.result:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Скан {role} (#{scan_id}) не завершён успешно — сравнивать нечего",
+        )
+    try:
+        data = json.loads(scan.result)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail=f"Результат скана #{scan_id} повреждён")
+    if "hosts" not in data:
+        raise HTTPException(status_code=400, detail=f"В результате скана #{scan_id} нет хостов")
+    return scan, data
 
 
 def _counts(counter: Counter, limit: int | None = None) -> list[NamedCount]:
@@ -68,4 +88,28 @@ def summary(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
         open_ports_total=open_ports_total,
         top_services=_counts(services, TOP_N),
         top_ports=_counts(ports, TOP_N),
+    )
+
+
+@router.get("/diff", response_model=ScanDiff)
+def diff(
+    base: int,
+    compare: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Что изменилось в сети между двумя сканами.
+
+    base — более ранний скан, compare — более поздний.
+    """
+    if base == compare:
+        raise HTTPException(status_code=400, detail="Нужны два разных скана")
+
+    base_scan, base_data = _load_done_scan(base, db, "base")
+    compare_scan, compare_data = _load_done_scan(compare, db, "compare")
+
+    return ScanDiff(
+        base=base_scan,
+        compare=compare_scan,
+        **diff_results(base_data, compare_data),
     )
