@@ -1,9 +1,10 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from app.auth.deps import get_current_user, require_role
 from app.database import get_db
 from app.models import AuditLog, Role, Scan, User
+from app.reports import ReportError, render_scan_report
 from app.schemas import ScanCreate, ScanOut, ScanSummary
 from app.security.scope import assert_in_scope
 from app.tasks import dispatch_scan
@@ -64,3 +65,30 @@ def delete_scan(
     db.add(AuditLog(user_id=admin.id, action="delete_scan", detail=str(scan_id)))
     db.commit()
     return {"deleted": scan_id}
+
+
+@router.get("/{scan_id}/report.pdf")
+def scan_report(
+    scan_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """PDF-отчёт по скану. Доступен всем ролям — это чтение."""
+    scan = db.get(Scan, scan_id)
+    if not scan:
+        raise HTTPException(status_code=404, detail="Не найден")
+
+    try:
+        pdf = render_scan_report(scan, requested_by=user.username)
+    except ReportError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    db.add(AuditLog(user_id=user.id, action="export_report", detail=f"scan {scan_id}"))
+    db.commit()
+
+    filename = f"androscanner-scan-{scan_id}.pdf"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

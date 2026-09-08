@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Отчёт по скану #{{ scan.id }}</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 18mm 16mm;
+      @bottom-center {
+        content: "Стр. " counter(page) " из " counter(pages);
+        font-size: 9pt;
+        color: #666;
+      }
+    }
+
+    body {
+      font-family: "DejaVu Sans", "Segoe UI", sans-serif;
+      font-size: 10pt;
+      line-height: 1.45;
+      color: #111;
+    }
+
+    h1 { font-size: 18pt; margin: 0 0 2mm; }
+    h2 { font-size: 13pt; margin: 8mm 0 2mm; }
+    h3 { font-size: 11pt; margin: 5mm 0 1.5mm; font-family: monospace; }
+
+    .subtitle { color: #555; font-size: 9pt; margin-bottom: 6mm; }
+
+    .scope-note {
+      border-left: 3pt solid #999;
+      padding: 2mm 0 2mm 3mm;
+      margin: 4mm 0 6mm;
+      font-size: 9pt;
+      color: #444;
+    }
+
+    .stats { width: 100%; margin-bottom: 4mm; }
+    .stats td {
+      width: 33%;
+      padding: 3mm;
+      border: 0.5pt solid #ccc;
+      text-align: center;
+    }
+    .stats .value { font-size: 16pt; font-weight: 600; display: block; }
+    .stats .label { font-size: 8pt; color: #555; }
+
+    table.data {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 3mm;
+    }
+    table.data th, table.data td {
+      border: 0.5pt solid #ccc;
+      padding: 1.4mm 2mm;
+      text-align: left;
+      font-size: 9pt;
+    }
+    table.data th {
+      background: #f2f2f2;
+      font-weight: 600;
+    }
+    table.data td.num { font-family: monospace; }
+
+    .host { margin-bottom: 5mm; page-break-inside: avoid; }
+    .host-meta { font-size: 9pt; color: #444; margin-bottom: 1.5mm; }
+    .host-meta span { margin-right: 6mm; }
+
+    .open { font-weight: 600; }
+    .closed { color: #777; }
+
+    .empty { color: #777; font-style: italic; }
+
+    .failed {
+      border: 0.5pt solid #b33;
+      background: #fdf3f3;
+      padding: 3mm;
+      color: #7a1f1f;
+    }
+
+    footer.meta {
+      margin-top: 8mm;
+      padding-top: 2mm;
+      border-top: 0.5pt solid #ccc;
+      font-size: 8pt;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+
+<h1>Отчёт по сканированию</h1>
+<p class="subtitle">
+  Цель <strong>{{ scan.target }}</strong> ·
+  профиль {{ scan.profile.value }} ·
+  {{ scan.created_at.strftime("%d.%m.%Y %H:%M") }}
+</p>
+
+<div class="scope-note">
+  Сканирование выполнено только в пределах разрешённых диапазонов
+  (allowed scope). Цель проверена по белому списку перед запуском.
+</div>
+
+{% if error %}
+  <div class="failed">
+    <strong>Скан не выполнен.</strong><br>
+    {{ error }}
+  </div>
+{% elif result %}
+
+  <table class="stats">
+    <tr>
+      <td><span class="value">{{ result.stats.hosts_total }}</span><span class="label">хостов найдено</span></td>
+      <td><span class="value">{{ result.stats.hosts_up }}</span><span class="label">из них живых</span></td>
+      <td><span class="value">{{ result.stats.open_ports }}</span><span class="label">открытых портов</span></td>
+    </tr>
+  </table>
+
+  <p class="subtitle">
+    Команда nmap: <code>{{ result.arguments }}</code>
+  </p>
+
+  <h2>Хосты</h2>
+
+  {% if not result.hosts %}
+    <p class="empty">Живых хостов не обнаружено.</p>
+  {% endif %}
+
+  {% for host in result.hosts %}
+    <div class="host">
+      <h3>{{ host.ip }}{% if host.hostnames %} ({{ host.hostnames | join(", ") }}){% endif %}</h3>
+
+      {% if host.mac or host.os %}
+        <p class="host-meta">
+          {% if host.mac %}<span>MAC: {{ host.mac }}{% if host.vendor %} — {{ host.vendor }}{% endif %}</span>{% endif %}
+          {% if host.os %}<span>ОС: {{ host.os[0].name }} ({{ host.os[0].accuracy }}%)</span>{% endif %}
+        </p>
+      {% endif %}
+
+      {% if host.ports %}
+        <table class="data">
+          <thead>
+            <tr>
+              <th>Порт</th><th>Состояние</th><th>Сервис</th><th>Версия</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for port in host.ports %}
+              <tr>
+                <td class="num">{{ port.port }}/{{ port.protocol }}</td>
+                <td class="{{ 'open' if port.state == 'open' else 'closed' }}">{{ port.state }}</td>
+                <td>{{ port.service or "—" }}</td>
+                <td>{{ (port.product ~ " " ~ port.version) | trim or "—" }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="empty">Открытых портов не обнаружено.</p>
+      {% endif %}
+    </div>
+  {% endfor %}
+
+{% else %}
+  <p class="empty">Скан ещё не завершён — данных нет.</p>
+{% endif %}
+
+<footer class="meta">
+  Отчёт сформирован {{ generated_at.strftime("%d.%m.%Y %H:%M") }}
+  пользователем {{ requested_by }} · Androscanner
+</footer>
+
+</body>
+</html>

@@ -11,9 +11,10 @@ venv/
 *.db
 *.sqlite3
 
-# Scan artifacts
-scan_results/
-reports/
+# Артефакты сканов — только в корне репозитория.
+# Без ведущего слэша шаблон ловил бы и app/reports/ с исходниками.
+/scan_results/
+/reports/
 *.xml
 
 # IDE / OS
