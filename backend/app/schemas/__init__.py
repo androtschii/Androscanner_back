@@ -46,15 +46,39 @@ class ScanCreate(BaseModel):
     profile: ScanProfile = ScanProfile.quick
 
 
-class ScanOut(BaseModel):
+class ScanSummary(BaseModel):
+    """Для списка сканов. Без result: он весит килобайты на каждый скан,
+    а списку не нужен."""
+
     model_config = ConfigDict(from_attributes=True)
     id: int
     target: str
     profile: ScanProfile
     status: ScanStatus
     created_by: int
-    result: str | None = None
     created_at: datetime
+
+
+class ScanOut(ScanSummary):
+    """Для карточки скана — с полным результатом."""
+
+    result: str | None = None
+
+
+# ---- Аналитика ----
+class NamedCount(BaseModel):
+    name: str
+    count: int
+
+
+class AnalyticsSummary(BaseModel):
+    scans_total: int
+    scans_by_status: list[NamedCount]
+    scans_by_profile: list[NamedCount]
+    hosts_unique: int
+    open_ports_total: int
+    top_services: list[NamedCount]
+    top_ports: list[NamedCount]
 
 
 # ---- Audit ----

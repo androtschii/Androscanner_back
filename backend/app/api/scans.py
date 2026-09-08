@@ -4,14 +4,14 @@ from sqlalchemy.orm import Session
 from app.auth.deps import get_current_user, require_role
 from app.database import get_db
 from app.models import AuditLog, Role, Scan, User
-from app.schemas import ScanCreate, ScanOut
+from app.schemas import ScanCreate, ScanOut, ScanSummary
 from app.security.scope import assert_in_scope
 from app.tasks import dispatch_scan
 
 router = APIRouter(prefix="/scans", tags=["scans"])
 
 
-@router.get("", response_model=list[ScanOut])
+@router.get("", response_model=list[ScanSummary])
 def list_scans(db: Session = Depends(get_db), _: User = Depends(get_current_user)):
     """Просмотр сканов — доступно всем ролям (включая viewer)."""
     return db.query(Scan).order_by(Scan.created_at.desc()).all()
