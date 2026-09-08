@@ -152,11 +152,38 @@ backend/
 # Linux / Docker
 celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
 
-# Windows (только для отладки, нужен работающий Redis)
+# Windows
 celery -A app.tasks.celery_app worker --loglevel=info --pool=solo
 ```
 
 `--pool=solo` на Windows обязателен: форк-пул там не работает.
+
+### Redis на Windows
+
+Официальных сборок Redis под Windows нет. Рабочий вариант —
+[Memurai](https://www.memurai.com/) (Redis-совместимый сервер, есть бесплатная
+Developer Edition):
+
+```powershell
+winget install --id Memurai.MemuraiDeveloper
+```
+
+Ставится как служба Windows и сразу слушает `127.0.0.1:6379`, перезагрузка
+не нужна. Отвечает как Redis 7.2.
+
+Полная связка для локальной проверки — три процесса:
+
+```powershell
+# 1) Memurai уже работает службой, проверить:  redis-cli ping
+
+# 2) воркер
+$env:PYTHONIOENCODING="utf-8"
+.\.venv\Scripts\python.exe -m celery -A app.tasks.celery_app worker --loglevel=info --pool=solo
+
+# 3) API с включённой очередью
+$env:USE_CELERY="true"
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
 
 ## Запуск через Docker
 
