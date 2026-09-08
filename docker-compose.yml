@@ -7,6 +7,10 @@ services:
       POSTGRES_DB: scanner
     volumes:
       - pgdata:/var/lib/postgresql/data
+    # Порт нужен воркеру: он живёт в host-сети и до внутреннего DNS не достаёт.
+    # Слушаем только 127.0.0.1, наружу база не торчит.
+    ports:
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U scanner"]
       interval: 5s
@@ -15,20 +19,53 @@ services:
 
   redis:
     image: redis:7-alpine
-    # Redis понадобится для Celery в Фазе 3
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   api:
     build: ./backend
     ports:
       - "8000:8000"
     environment:
+      # API в обычной bridge-сети — обращается к сервисам по именам
       DATABASE_URL: postgresql+psycopg://scanner:scanner@db:5432/scanner
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: change_me_dev_secret
       DEFAULT_ADMIN_USERNAME: admin
       DEFAULT_ADMIN_PASSWORD: admin
+      USE_CELERY: "true"
     depends_on:
       db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: ./backend
+    # --pool=solo не нужен: внутри контейнера Linux, форк-пул работает штатно
+    command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
+    # host-сеть обязательна для ARP-discovery: в bridge-сети контейнер сидит
+    # в своей подсети и вашу локалку на L2 не видит. Плата за это — сервисы
+    # приходится звать через 127.0.0.1, а не по именам db/redis.
+    network_mode: host
+    environment:
+      DATABASE_URL: postgresql+psycopg://scanner:scanner@127.0.0.1:5432/scanner
+      REDIS_URL: redis://127.0.0.1:6379/0
+      JWT_SECRET: change_me_dev_secret
+      USE_CELERY: "true"
+    # nmap умеет SYN-скан, ARP и определение ОС только с этими правами
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
 volumes:

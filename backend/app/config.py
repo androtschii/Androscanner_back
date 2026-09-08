@@ -17,8 +17,13 @@ class Settings(BaseSettings):
     default_admin_username: str = "admin"
     default_admin_password: str = "admin"  # смени после первого входа!
 
-    # Redis (для Celery в следующих фазах)
+    # Redis / Celery
     redis_url: str = "redis://redis:6379/0"
+
+    # true  — сканы уходят в Celery (prod, Docker: есть Redis и Linux)
+    # false — выполняются через FastAPI BackgroundTasks (dev на Windows:
+    #         нативного Redis нет, Celery Windows официально не поддерживает)
+    use_celery: bool = False
 
     # Путь к nmap. Пусто = искать в PATH (так на Linux/в Docker).
     # На Windows nmap ставится в Program Files и в PATH не попадает.

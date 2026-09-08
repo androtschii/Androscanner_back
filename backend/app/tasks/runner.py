@@ -1,21 +1,24 @@
 """Выполнение скана и запись результата в БД.
 
-Сама задача (execute_scan) от способа запуска не зависит — её вызывает
-тонкий диспетчер:
+Тело задачи (execute_scan) от способа запуска не зависит. Запуск выбирает
+dispatch_scan по настройке USE_CELERY:
 
-    dev (Windows)  → FastAPI BackgroundTasks, см. dispatch_scan ниже
-    prod (Linux)   → Celery: run_scan.delay(scan_id)   ← Фаза 3
+    USE_CELERY=true   → Celery: run_scan.delay(scan_id)      (prod, Docker)
+    USE_CELERY=false  → FastAPI BackgroundTasks              (dev на Windows)
 
-При переходе на Celery меняется только dispatch_scan, тело задачи остаётся.
+Второй режим нужен потому, что нативного Redis под Windows нет, а Celery
+официально не поддерживает Windows с версии 4.
 """
 
 import json
 
 from fastapi import BackgroundTasks, HTTPException
 
+from app.config import settings
 from app.database import SessionLocal
 from app.models import Scan, ScanStatus
 from app.scanner import ScannerError, run_nmap_scan
+from app.tasks.celery_app import celery_app
 
 
 def execute_scan(scan_id: int) -> None:
@@ -52,6 +55,15 @@ def execute_scan(scan_id: int) -> None:
         db.close()
 
 
+@celery_app.task(name="scan.run")
+def run_scan(scan_id: int) -> None:
+    """Celery-обёртка над execute_scan. Вся логика — в execute_scan."""
+    execute_scan(scan_id)
+
+
 def dispatch_scan(scan_id: int, background_tasks: BackgroundTasks) -> None:
-    """Ставит скан на выполнение. В Фазе 3 здесь будет run_scan.delay(scan_id)."""
-    background_tasks.add_task(execute_scan, scan_id)
+    """Ставит скан на выполнение выбранным способом."""
+    if settings.use_celery:
+        run_scan.delay(scan_id)
+    else:
+        background_tasks.add_task(execute_scan, scan_id)

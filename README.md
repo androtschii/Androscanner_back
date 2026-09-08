@@ -103,30 +103,84 @@ curl localhost:8000/audit -H "Authorization: Bearer $TOKEN"
 
 ```
 backend/
-├── alembic/         # миграции схемы БД
+├── alembic/          # миграции схемы БД
 ├── app/
-│   ├── main.py       # сборка приложения, миграции при старте, сидер
-│   ├── config.py     # настройки (.env)
-│   ├── database.py   # подключение к БД
+│   ├── main.py        # сборка приложения, миграции при старте, сидер
+│   ├── config.py      # настройки (.env)
+│   ├── database.py    # подключение к БД
 │   ├── models/        # User, Scan, AllowedScope, AuditLog
-│   ├── schemas/        # Pydantic-схемы
-│   ├── auth/           # JWT + RBAC (security.py, deps.py)
-│   ├── security/        # scope.py — единая точка допуска к сканированию
-│   └── api/              # роуты: auth, users, scopes, scans, audit
-└── tests/            # pytest: allowed-scope, RBAC
+│   ├── schemas/       # Pydantic-схемы
+│   ├── auth/          # JWT + RBAC (security.py, deps.py)
+│   ├── security/      # scope.py — единая точка допуска к сканированию
+│   ├── scanner/       # движок: profiles, engine, parser, arp, privileges
+│   ├── tasks/         # celery_app, runner (тело задачи + диспетчер)
+│   └── api/           # роуты: auth, users, scopes, scans, audit
+└── tests/             # pytest: scope, RBAC, движок, задачи
 ```
+
+## Профили сканирования
+
+| Профиль | Аргументы nmap | Права админа | Что делает |
+|---|---|:---:|---|
+| `discovery` | `-sn -PR` | **нужны** | ARP-поиск живых хостов в своём сегменте |
+| `quick` | `-sT -T4 --top-ports 100` | не нужны | TCP connect-скан 100 популярных портов |
+| `full` | `-sS -sV -O -T4 -p-` | **нужны** | SYN-скан всех портов + сервисы + ОС |
+
+`quick` работает без прав не потому, что «ослаблен» — connect-скан это
+отдельный тип сканирования, ему raw-сокеты не нужны в принципе.
+
+Если профилю нужны права, а их нет, скан помечается `failed` с объяснением.
+Молчаливой подмены профиля на более слабый **нет** — это скрыло бы от вас,
+что скан на самом деле увидел меньше, чем вы просили.
+
+## Фоновое выполнение
+
+Тело задачи (`app/tasks/runner.py::execute_scan`) от способа запуска не зависит.
+Выбирает диспетчер по настройке `USE_CELERY`:
+
+| `USE_CELERY` | Как выполняется | Когда |
+|---|---|---|
+| `false` | FastAPI BackgroundTasks, прямо в процессе API | dev на Windows |
+| `true` | `run_scan.delay(scan_id)` через Redis | prod, Docker |
+
+Второй режим по умолчанию выключен: нативного Redis под Windows не существует,
+а Celery официально не поддерживает Windows с версии 4.
+
+### Запуск воркера
+
+```bash
+# Linux / Docker
+celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
+
+# Windows (только для отладки, нужен работающий Redis)
+celery -A app.tasks.celery_app worker --loglevel=info --pool=solo
+```
+
+`--pool=solo` на Windows обязателен: форк-пул там не работает.
+
+## Запуск через Docker
+
+```bash
+docker compose up --build
+```
+
+Поднимет `db`, `redis`, `api` и `worker`. Воркер работает в host-сети —
+иначе он сидел бы в своей подсети и ARP-discovery не видел бы вашу локалку.
+Из-за этого он обращается к Postgres и Redis по `127.0.0.1`, а не по именам
+сервисов: в host-режиме внутренний DNS Docker недоступен.
 
 ## Заметки
 
-- `JWT_SECRET` теперь обязателен — без него приложение не стартует
+- `JWT_SECRET` обязателен — без него приложение не стартует
   (сознательно: слабый дефолт в проде хуже, чем явная ошибка запуска).
 - CORS ограничен списком `cors_origins` в `.env` (по умолчанию — Vite dev-сервер
   `localhost:5173`), не `*`.
-- Warning `error reading bcrypt version` больше не появляется — bcrypt зафиксирован
+- Warning `error reading bcrypt version` не появляется — bcrypt зафиксирован
   на версии `4.0.1`, совместимой с passlib `1.7.4`.
+- На Windows nmap не попадает в `PATH` — путь задаётся через `NMAP_PATH`.
 
 ## Следующие шаги (по плану)
 
-- **Фаза 2:** движок nmap/scapy в `app/scanner/`
-- **Фаза 3:** Celery-задача `run_scan.delay(scan.id)` — заглушка отмечена в `api/scans.py`
-- **Фаза 4:** React-фронтенд
+- **Фаза 4:** страница деталей скана, дашборд с графиками, админка
+- **Фаза 5:** аналитика, diff между сканами, граф сети, PDF-отчёты
+- **Фаза 6:** hardening, документация, деплой
