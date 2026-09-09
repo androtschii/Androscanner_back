@@ -16,10 +16,13 @@ from app.security.scope import target_in_scope
 
 
 def _clear_failures(username):
+    """Изоляция тестов друг от друга. В приложении журнал НЕ чистится —
+    это делается только здесь, чтобы соседние тесты не влияли на счётчик."""
     db = SessionLocal()
     try:
         db.query(AuditLog).filter(
-            AuditLog.action == ACTION_FAILED, AuditLog.detail == username
+            AuditLog.action.in_([ACTION_FAILED, "login"]),
+            AuditLog.detail == username,
         ).delete(synchronize_session=False)
         db.commit()
     finally:
@@ -61,7 +64,7 @@ def test_lockout_does_not_leak_whether_user_exists(client):
     _clear_failures("admin")
 
 
-def test_successful_login_clears_the_counter(client):
+def test_successful_login_resets_the_counter(client):
     _clear_failures("admin")
     for _ in range(MAX_ATTEMPTS - 1):
         client.post("/auth/login", data={"username": "admin", "password": "wrong"})
@@ -69,9 +72,25 @@ def test_successful_login_clears_the_counter(client):
     ok = client.post("/auth/login", data={"username": "admin", "password": "admin"})
     assert ok.status_code == 200
 
-    # Счётчик обнулён — снова можно ошибаться, не упираясь в лимит
+    # Счётчик отсчитывается от успешного входа — снова можно ошибаться
     r = client.post("/auth/login", data={"username": "admin", "password": "wrong"})
     assert r.status_code == 401
+    _clear_failures("admin")
+
+
+def test_successful_login_does_not_erase_failure_history(client, admin_headers):
+    """Первая версия удаляла записи о неудачах после успешного входа.
+    Последствие: подобравший пароль стирал следы своих попыток самим
+    фактом успеха — исчезали ровно те записи, ради которых журнал нужен."""
+    _clear_failures("admin")
+    for _ in range(3):
+        client.post("/auth/login", data={"username": "admin", "password": "wrong"})
+
+    client.post("/auth/login", data={"username": "admin", "password": "admin"})
+
+    audit = client.get("/audit?action=login_failed&limit=200", headers=admin_headers).json()
+    failures = [e for e in audit["items"] if e["detail"] == "admin"]
+    assert len(failures) == 3, "следы неудачных попыток стёрты успешным входом"
     _clear_failures("admin")
 
 

@@ -6,11 +6,7 @@ from app.auth.security import create_access_token, verify_password
 from app.database import get_db
 from app.models import AuditLog, User
 from app.schemas import Token
-from app.security.login_guard import (
-    assert_not_locked_out,
-    clear_failures,
-    record_failure,
-)
+from app.security.login_guard import assert_not_locked_out, record_failure
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -38,7 +34,9 @@ def login(
         record_failure(form.username, db)
         raise HTTPException(status_code=403, detail="Пользователь отключён")
 
-    clear_failures(form.username, db)
+    # Счётчик неудач обнуляется самим фактом успешного входа:
+    # login_guard отсчитывает попытки от последней успешной записи.
+    # Удалять что-либо из журнала нельзя — он только пополняется.
     db.add(AuditLog(user_id=user.id, action="login", detail=user.username))
     db.commit()
 
