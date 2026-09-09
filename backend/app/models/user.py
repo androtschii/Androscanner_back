@@ -1,10 +1,11 @@
 import enum
-from datetime import datetime, timezone
+from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, String
+from sqlalchemy import Enum, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
+from app.models.types import UTCDateTime, utcnow
 
 
 class Role(str, enum.Enum):
@@ -23,5 +24,5 @@ class User(Base):
     role: Mapped[Role] = mapped_column(Enum(Role), default=Role.viewer)
     is_active: Mapped[bool] = mapped_column(default=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        UTCDateTime, default=utcnow
     )

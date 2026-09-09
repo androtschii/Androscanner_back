@@ -1,10 +1,11 @@
 import enum
-from datetime import datetime, timezone
+from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, Text
+from sqlalchemy import Enum, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
+from app.models.types import UTCDateTime, utcnow
 
 
 class ScanStatus(str, enum.Enum):
@@ -28,7 +29,7 @@ class AllowedScope(Base):
     cidr: Mapped[str] = mapped_column(String(64))  # напр. 192.168.1.0/24
     description: Mapped[str] = mapped_column(String(255), default="")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        UTCDateTime, default=utcnow
     )
 
 
@@ -42,7 +43,7 @@ class Scan(Base):
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     result: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON с результатом
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        UTCDateTime, default=utcnow
     )
 
 
@@ -55,5 +56,5 @@ class AuditLog(Base):
     action: Mapped[str] = mapped_column(String(128))
     detail: Mapped[str] = mapped_column(String(512), default="")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+        UTCDateTime, default=utcnow
     )
