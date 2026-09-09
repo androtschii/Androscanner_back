@@ -39,12 +39,13 @@ class Scan(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     target: Mapped[str] = mapped_column(String(128))
     profile: Mapped[ScanProfile] = mapped_column(Enum(ScanProfile), default=ScanProfile.quick)
-    status: Mapped[ScanStatus] = mapped_column(Enum(ScanStatus), default=ScanStatus.queued)
+    # Индекс: список сканов всегда сортируется по дате, аналитика фильтрует по статусу
+    status: Mapped[ScanStatus] = mapped_column(
+        Enum(ScanStatus), default=ScanStatus.queued, index=True
+    )
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
     result: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON с результатом
-    created_at: Mapped[datetime] = mapped_column(
-        UTCDateTime, default=utcnow
-    )
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
 
 
 class AuditLog(Base):
@@ -53,8 +54,8 @@ class AuditLog(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-    action: Mapped[str] = mapped_column(String(128))
-    detail: Mapped[str] = mapped_column(String(512), default="")
-    created_at: Mapped[datetime] = mapped_column(
-        UTCDateTime, default=utcnow
-    )
+    # Индексы под два запроса: журнал сортируется по дате,
+    # а лимит попыток входа ищет по (action, detail, created_at)
+    action: Mapped[str] = mapped_column(String(128), index=True)
+    detail: Mapped[str] = mapped_column(String(512), default="", index=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)

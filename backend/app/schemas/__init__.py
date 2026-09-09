@@ -1,8 +1,24 @@
 from datetime import datetime
+from typing import Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models import Role, ScanProfile, ScanStatus
+
+T = TypeVar("T")
+
+
+class Page(BaseModel, Generic[T]):
+    """Страница результатов.
+
+    `total` нужен фронтенду, чтобы нарисовать «5 из 137» и понять, есть ли
+    следующая страница. Без него он мог бы только гадать по длине списка.
+    """
+
+    items: list[T]
+    total: int
+    limit: int
+    offset: int
 
 
 # ---- Auth ----

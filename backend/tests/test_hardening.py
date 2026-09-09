@@ -31,7 +31,7 @@ def test_failed_login_is_recorded_in_audit(client, admin_headers):
     _clear_failures("ghost")
     client.post("/auth/login", data={"username": "ghost", "password": "wrong-one"})
 
-    audit = client.get("/audit", headers=admin_headers).json()
+    audit = client.get("/audit", headers=admin_headers).json()["items"]
     assert any(e["action"] == ACTION_FAILED and e["detail"] == "ghost" for e in audit)
     _clear_failures("ghost")
 

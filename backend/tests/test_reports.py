@@ -171,7 +171,7 @@ def test_report_is_pdf_and_logged(client, admin_headers):
     assert r.headers["content-type"] == "application/pdf"
     assert f"androscanner-scan-{scan_id}.pdf" in r.headers["content-disposition"]
 
-    audit = client.get("/audit", headers=admin_headers).json()
+    audit = client.get("/audit", headers=admin_headers).json()["items"]
     assert any(e["action"] == "export_report" for e in audit)
 
 

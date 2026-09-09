@@ -60,7 +60,7 @@ def test_all_models_preserve_timezone(client):
 def test_api_serializes_datetime_with_offset(client, admin_headers):
     """В JSON дата должна уходить с указанием зоны — иначе браузер
     истолкует её как локальное время."""
-    scans = client.get("/scans", headers=admin_headers).json()
+    scans = client.get("/scans", headers=admin_headers).json()["items"]
     assert scans, "нужен хотя бы один скан"
 
     created = scans[0]["created_at"]

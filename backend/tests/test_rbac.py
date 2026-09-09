@@ -19,4 +19,6 @@ def test_viewer_cannot_read_audit_log(client, viewer_headers):
 def test_admin_can_read_audit_log(client, admin_headers):
     r = client.get("/audit", headers=admin_headers)
     assert r.status_code == 200
-    assert isinstance(r.json(), list)
+    body = r.json()
+    assert isinstance(body["items"], list)
+    assert body["total"] >= len(body["items"])

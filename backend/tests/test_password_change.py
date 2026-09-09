@@ -115,7 +115,7 @@ def test_change_is_recorded_in_audit(client, admin_headers):
         json={"current_password": "parol-dlya-loga", "new_password": "novyy-dlya-loga"},
     )
 
-    audit = client.get("/audit", headers=admin_headers).json()
+    audit = client.get("/audit", headers=admin_headers).json()["items"]
     assert any(
         e["action"] == "change_password" and e["detail"] == "auditor" for e in audit
     )

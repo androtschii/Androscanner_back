@@ -91,12 +91,12 @@ def test_summary_groups_by_status_and_profile(client, admin_headers):
 
 def test_scan_list_omits_result(client, admin_headers):
     """Список сканов не должен таскать полные результаты — они весят килобайты."""
-    scans = client.get("/scans", headers=admin_headers).json()
+    scans = client.get("/scans", headers=admin_headers).json()["items"]
     assert scans, "нужен хотя бы один скан"
     assert "result" not in scans[0]
 
 
 def test_scan_detail_includes_result(client, admin_headers):
-    scans = client.get("/scans", headers=admin_headers).json()
+    scans = client.get("/scans", headers=admin_headers).json()["items"]
     detail = client.get(f"/scans/{scans[0]['id']}", headers=admin_headers).json()
     assert "result" in detail
