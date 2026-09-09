@@ -188,7 +188,7 @@ backend/
 │   ├── reports/        # PDF через Jinja2 + WeasyPrint
 │   ├── tasks/          # celery_app, runner
 │   └── api/            # роуты
-└── tests/              # 89 тестов
+└── tests/              # 117 тестов
 ```
 
 ## Тесты
@@ -199,6 +199,25 @@ cd backend
 ```
 
 Реальная сеть в тестах не сканируется: nmap замокан.
+
+По умолчанию прогон идёт на SQLite. Тот же набор можно прогнать
+на PostgreSQL:
+
+```bash
+TEST_DATABASE_URL=postgresql+psycopg://scanner:scanner@localhost:5432/scanner pytest -q
+```
+
+В шапке отчёта видно, какая база использовалась.
+
+## CI
+
+`.github/workflows/ci.yml` на каждый push и pull request:
+
+- тесты **на обеих базах** — SQLite и PostgreSQL. Расхождения между ними
+  должны всплывать в CI, а не в бою: именно так был найден баг
+  с часовыми поясами
+- `docker compose config` — файл проверяется хотя бы на синтаксис
+- сборка образа, наличие в нём nmap и работоспособность WeasyPrint
 
 ---
 

@@ -6,7 +6,7 @@ from alembic.config import Config
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import analytics, audit, auth, scans, scopes, users
+from app.api import analytics, audit, auth, health, scans, scopes, users
 from app.config import settings
 from app.database import SessionLocal
 from app.seed import seed_admin
@@ -51,8 +51,4 @@ app.include_router(scopes.router)
 app.include_router(scans.router)
 app.include_router(audit.router)
 app.include_router(analytics.router)
-
-
-@app.get("/health", tags=["system"])
-def health():
-    return {"status": "ok"}
+app.include_router(health.router)
