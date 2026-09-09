@@ -66,18 +66,61 @@ def create_user(
 
 
 @router.delete("/{user_id}", dependencies=[Depends(require_role(Role.admin))])
-def delete_user(
+def deactivate_user(
     user_id: int,
     db: Session = Depends(get_db),
     admin: User = Depends(get_current_user),
 ):
+    """Отключает пользователя вместо удаления.
+
+    Раньше здесь было настоящее удаление строки, и это давало две беды.
+
+    На SQLite (dev) внешние ключи по умолчанию не проверяются: удаление
+    проходило, а сканы и записи журнала оставались ссылаться на
+    несуществующего пользователя. На PostgreSQL (prod) то же удаление
+    упало бы с нарушением целостности и вернуло 500.
+
+    Но главное даже не это. В инструменте с audit-log удаление
+    пользователя стирает ответственность: кто запускал сканы — уже
+    не узнать. Поэтому пользователь отключается, а история остаётся.
+
+    Полезный побочный эффект: get_current_user проверяет is_active,
+    поэтому токен отключённого перестаёт работать сразу — не дожидаясь
+    истечения срока. Отзыва JWT в системе нет, и здесь это его заменяет.
+    """
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Не найден")
     if user.id == admin.id:
-        raise HTTPException(status_code=400, detail="Нельзя удалить самого себя")
+        raise HTTPException(status_code=400, detail="Нельзя отключить самого себя")
+    if not user.is_active:
+        raise HTTPException(status_code=409, detail="Пользователь уже отключён")
 
-    db.delete(user)
-    db.add(AuditLog(user_id=admin.id, action="delete_user", detail=user.username))
+    user.is_active = False
+    db.add(AuditLog(user_id=admin.id, action="deactivate_user", detail=user.username))
     db.commit()
-    return {"deleted": user_id}
+    return {"deactivated": user_id}
+
+
+@router.post(
+    "/{user_id}/activate",
+    response_model=UserOut,
+    dependencies=[Depends(require_role(Role.admin))],
+)
+def activate_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(get_current_user),
+):
+    """Включает отключённого пользователя обратно."""
+    user = db.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Не найден")
+    if user.is_active:
+        raise HTTPException(status_code=409, detail="Пользователь уже активен")
+
+    user.is_active = True
+    db.add(AuditLog(user_id=admin.id, action="activate_user", detail=user.username))
+    db.commit()
+    db.refresh(user)
+    return user
