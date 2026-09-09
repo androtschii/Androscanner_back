@@ -32,6 +32,13 @@ class UserOut(BaseModel):
     created_at: datetime
 
 
+class PasswordChange(BaseModel):
+    # Текущий пароль обязателен: иначе перехваченный токен позволял бы
+    # сменить пароль и запереть владельца снаружи
+    current_password: str
+    new_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=128)
+
+
 # ---- Scopes ----
 class ScopeCreate(BaseModel):
     cidr: str
