@@ -1,122 +1,58 @@
-# Network Scanner — Backend (Фаза 1.5)
+# Androscanner — Backend
 
-Каркас бэкенда сетевого сканера: FastAPI + PostgreSQL + JWT + RBAC (3 роли).
-Движок сканирования и фронтенд — следующие фазы.
+Сканер собственной сети с web-панелью, разграничением прав и аналитикой.
+FastAPI + PostgreSQL + Celery + nmap/scapy.
 
-## Что уже работает
+Фронтенд: [Androscanner_front](https://github.com/androtschii/Androscanner_front)
 
-- Авторизация по JWT (`/auth/login`)
-- Три роли: **admin**, **analyst**, **viewer** с разграничением прав
-- Управление пользователями (admin)
-- Allowed scope — разрешённые для скана диапазоны (admin)
-- Создание/просмотр/удаление сканов с **проверкой scope** (скан вне диапазона → 403),
-  единая точка допуска — `app/security/scope.py::assert_in_scope()`
-- Audit-log всех действий + эндпоинт `GET /audit` (только admin)
-- Автосоздание админа при первом запуске
-- Миграции схемы через **Alembic** (накатываются автоматически при старте)
-- Swagger-документация на `/docs`
+---
+
+## ⚠️ Главное правило
+
+**Сканировать разрешено только свои сети.**
+
+Цель проверяется по белому списку CIDR-диапазонов (allowed scope). Проверка
+стоит в двух местах:
+
+1. в API — быстрый отказ до постановки задачи в очередь;
+2. **внутри самого движка**, перед вызовом nmap — на случай, если движок
+   вызовут в обход HTTP: из скрипта, из Celery-задачи, из консоли.
+
+Цель вне списка получает `403`. Все запуски и все отказы пишутся в audit-log.
+
+Побочный, но важный эффект: проверка scope работает и как валидатор ввода.
+`ipaddress.ip_network()` не принимает ничего, кроме чистого IP или CIDR,
+поэтому подставить свои аргументы в командную строку nmap через поле `target`
+нельзя — `-oX /tmp/x`, `192.168.1.1; rm -rf /` и подобное отбиваются
+на этом же шаге. Закреплено тестами.
+
+---
+
+## Возможности
+
+- JWT-авторизация, три роли: **admin**, **analyst**, **viewer**
+- Allowed scope: разрешённые диапазоны, настраиваются админом
+- Три профиля сканирования (nmap + scapy)
+- Фоновое выполнение через Celery + Redis
+- Audit-log всех действий, включая неудачные входы
+- Аналитика: сводка, сравнение сканов, карта сети
+- PDF-отчёты (WeasyPrint)
+- Миграции схемы через Alembic
+- Swagger на `/docs`
 
 ## Матрица прав
 
 | Действие | admin | analyst | viewer |
 |---|:---:|:---:|:---:|
 | Управление пользователями | ✅ | ❌ | ❌ |
-| Настройка scope | ✅ | ❌ | ❌ |
+| Настройка allowed scope | ✅ | ❌ | ❌ |
 | Запуск скана | ✅ | ✅ | ❌ |
 | Удаление скана | ✅ | ❌ | ❌ |
-| Просмотр сканов | ✅ | ✅ | ✅ |
+| Просмотр сканов и аналитики | ✅ | ✅ | ✅ |
+| Выгрузка PDF-отчёта | ✅ | ✅ | ✅ |
 | Просмотр audit-log | ✅ | ❌ | ❌ |
 
-## Запуск локально на Windows (проверено)
-
-Nmap/scapy пока не задействованы, поэтому для Фазы 1.5 админ-прав и WSL не требуется —
-всё работает на нативном Python и SQLite.
-
-```powershell
-winget install --id Python.Python.3.12 --scope user
-```
-
-```bash
-cd backend
-python -m venv .venv
-.venv/Scripts/python.exe -m pip install -r requirements.txt
-cp .env.example .env
-# в .env поменяй JWT_SECRET на свой:
-#   .venv/Scripts/python.exe -c "import secrets;print(secrets.token_hex(32))"
-# и укажи DATABASE_URL=sqlite+pysqlite:///./scanner.db
-.venv/Scripts/python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
-
-- API: http://127.0.0.1:8000
-- Swagger: http://127.0.0.1:8000/docs
-- Дефолтный вход: `admin` / `admin` — **смени пароль сразу!**
-
-## Запуск через Docker (для прод-стека с Postgres/Redis)
-
-```bash
-cp backend/.env.example backend/.env   # поменять JWT_SECRET!
-docker compose up --build
-```
-
-## Тесты
-
-```bash
-cd backend
-.venv/Scripts/python.exe -m pip install -r requirements-dev.txt
-.venv/Scripts/python.exe -m pytest -v
-```
-
-Тесты гоняются на изолированной временной SQLite-базе (см. `tests/conftest.py`) через
-реальные alembic-миграции — не на dev-базе `scanner.db`.
-
-## Миграции (Alembic)
-
-Накатываются автоматически при старте приложения (`app/main.py::run_migrations`).
-Ручные команды:
-
-```bash
-cd backend
-.venv/Scripts/python.exe -m alembic revision --autogenerate -m "описание изменения"
-.venv/Scripts/python.exe -m alembic upgrade head
-```
-
-## Быстрая проверка (curl)
-
-```bash
-# вход
-TOKEN=$(curl -s -X POST localhost:8000/auth/login \
-  -d "username=admin&password=admin" | python3 -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
-
-# добавить свой диапазон
-curl -X POST localhost:8000/scopes -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" -d '{"cidr":"192.168.1.0/24","description":"home"}'
-
-# запустить скан (в пределах scope)
-curl -X POST localhost:8000/scans -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" -d '{"target":"192.168.1.10","profile":"quick"}'
-
-# журнал действий (только admin)
-curl localhost:8000/audit -H "Authorization: Bearer $TOKEN"
-```
-
-## Структура
-
-```
-backend/
-├── alembic/          # миграции схемы БД
-├── app/
-│   ├── main.py        # сборка приложения, миграции при старте, сидер
-│   ├── config.py      # настройки (.env)
-│   ├── database.py    # подключение к БД
-│   ├── models/        # User, Scan, AllowedScope, AuditLog
-│   ├── schemas/       # Pydantic-схемы
-│   ├── auth/          # JWT + RBAC (security.py, deps.py)
-│   ├── security/      # scope.py — единая точка допуска к сканированию
-│   ├── scanner/       # движок: profiles, engine, parser, arp, privileges
-│   ├── tasks/         # celery_app, runner (тело задачи + диспетчер)
-│   └── api/           # роуты: auth, users, scopes, scans, audit
-└── tests/             # pytest: scope, RBAC, движок, задачи
-```
+---
 
 ## Профили сканирования
 
@@ -130,84 +66,155 @@ backend/
 отдельный тип сканирования, ему raw-сокеты не нужны в принципе.
 
 Если профилю нужны права, а их нет, скан помечается `failed` с объяснением.
-Молчаливой подмены профиля на более слабый **нет** — это скрыло бы от вас,
-что скан на самом деле увидел меньше, чем вы просили.
+Молчаливой подмены профиля на более слабый **нет**: это скрыло бы от вас,
+что скан увидел меньше, чем вы просили.
 
-## Фоновое выполнение
+---
 
-Тело задачи (`app/tasks/runner.py::execute_scan`) от способа запуска не зависит.
-Выбирает диспетчер по настройке `USE_CELERY`:
+## Запуск через Docker (рекомендуется)
 
-| `USE_CELERY` | Как выполняется | Когда |
-|---|---|---|
-| `false` | FastAPI BackgroundTasks, прямо в процессе API | dev на Windows |
-| `true` | `run_scan.delay(scan_id)` через Redis | prod, Docker |
-
-Второй режим по умолчанию выключен: нативного Redis под Windows не существует,
-а Celery официально не поддерживает Windows с версии 4.
-
-### Запуск воркера
+Единственный способ, где работает всё сразу: nmap, ARP, Celery и PDF.
 
 ```bash
-# Linux / Docker
-celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
-
-# Windows
-celery -A app.tasks.celery_app worker --loglevel=info --pool=solo
-```
-
-`--pool=solo` на Windows обязателен: форк-пул там не работает.
-
-### Redis на Windows
-
-Официальных сборок Redis под Windows нет. Рабочий вариант —
-[Memurai](https://www.memurai.com/) (Redis-совместимый сервер, есть бесплатная
-Developer Edition):
-
-```powershell
-winget install --id Memurai.MemuraiDeveloper
-```
-
-Ставится как служба Windows и сразу слушает `127.0.0.1:6379`, перезагрузка
-не нужна. Отвечает как Redis 7.2.
-
-Полная связка для локальной проверки — три процесса:
-
-```powershell
-# 1) Memurai уже работает службой, проверить:  redis-cli ping
-
-# 2) воркер
-$env:PYTHONIOENCODING="utf-8"
-.\.venv\Scripts\python.exe -m celery -A app.tasks.celery_app worker --loglevel=info --pool=solo
-
-# 3) API с включённой очередью
-$env:USE_CELERY="true"
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
-
-## Запуск через Docker
-
-```bash
+cp .env.example .env
+python -c "import secrets; print(secrets.token_hex(32))"   # → JWT_SECRET
+# заполни POSTGRES_PASSWORD и DEFAULT_ADMIN_PASSWORD
 docker compose up --build
 ```
 
-Поднимет `db`, `redis`, `api` и `worker`. Воркер работает в host-сети —
+Без заполненного `.env` запуск **намеренно падает** с указанием, чего не хватает:
+молча подставленный дефолтный ключ подписи опаснее, чем упавший старт.
+
+Поднимутся `db`, `redis`, `api` и `worker`. Воркер работает в host-сети —
 иначе он сидел бы в своей подсети и ARP-discovery не видел бы вашу локалку.
 Из-за этого он обращается к Postgres и Redis по `127.0.0.1`, а не по именам
 сервисов: в host-режиме внутренний DNS Docker недоступен.
 
-## Заметки
+API слушает только `127.0.0.1:8000` — панель управления сканером не должна
+оказаться доступной из сети по недосмотру.
 
-- `JWT_SECRET` обязателен — без него приложение не стартует
-  (сознательно: слабый дефолт в проде хуже, чем явная ошибка запуска).
-- CORS ограничен списком `cors_origins` в `.env` (по умолчанию — Vite dev-сервер
-  `localhost:5173`), не `*`.
-- Warning `error reading bcrypt version` не появляется — bcrypt зафиксирован
-  на версии `4.0.1`, совместимой с passlib `1.7.4`.
-- На Windows nmap не попадает в `PATH` — путь задаётся через `NMAP_PATH`.
+## Запуск локально на Windows
 
-## Следующие шаги (по плану)
+Работает всё, кроме PDF-отчётов (нужен Pango — см. ниже).
 
-- **Фаза 4:** страница деталей скана, дашборд с графиками, админка
-- **Фаза 5:** аналитика, diff между сканами, граф сети, PDF-отчёты
-- **Фаза 6:** hardening, документация, деплой
+```powershell
+winget install --id Python.Python.3.12 --scope user
+winget install --id Insecure.Nmap          # нужен UAC, ставит драйвер Npcap
+winget install --id Memurai.MemuraiDeveloper   # Redis-совместимый сервер
+```
+
+```bash
+cd backend
+python -m venv .venv
+.venv/Scripts/python.exe -m pip install -r requirements.txt
+cp .env.example .env
+```
+
+В `.env` укажи:
+
+```
+DATABASE_URL=sqlite+pysqlite:///./scanner.db
+JWT_SECRET=<сгенерируй свой>
+NMAP_PATH=C:\Program Files (x86)\Nmap\nmap.exe
+```
+
+Три процесса:
+
+```powershell
+# 1) Memurai уже работает службой — проверить: redis-cli ping
+
+# 2) воркер Celery
+$env:PYTHONIOENCODING="utf-8"
+.\.venv\Scripts\python.exe -m celery -A app.tasks.celery_app worker --loglevel=info --pool=solo
+
+# 3) API
+$env:USE_CELERY="true"
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+`--pool=solo` на Windows обязателен: форк-пул там не работает.
+
+Без Redis тоже можно — при `USE_CELERY=false` сканы выполняются прямо
+в процессе API через `BackgroundTasks`. Воркер тогда не нужен.
+
+---
+
+## Безопасность
+
+Что сделано и почему:
+
+| Мера | Зачем |
+|---|---|
+| Проверка allowed scope в API **и** в движке | обход HTTP-слоя не даёт сканировать чужие сети |
+| `ipaddress.ip_network()` как валидатор цели | закрывает подстановку аргументов в nmap |
+| `JWT_SECRET` обязателен, дефолта нет | слабый ключ в проде хуже, чем упавший старт |
+| Лимит попыток входа: 5 за 15 минут → `429` | без него пароль перебирается неограниченно |
+| Неудачные входы пишутся в audit-log | подбор пароля не должен оставаться незамеченным |
+| Одинаковый ответ на неверный логин и пароль | иначе по тексту ошибки перебирается список пользователей |
+| Минимум 10 символов в пароле | длина даёт больше стойкости, чем обязательный спецсимвол (NIST 800-63B) |
+| Предупреждение о слабом пароле админа при старте | `admin/admin` не должен дожить до боевой сети |
+| CORS ограничен списком, не `*` | |
+| `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Cache-Control: no-store`, CSP | Swagger из-под строгого CSP выведен — иначе он не грузится |
+| Порты Postgres и Redis только на `127.0.0.1` | |
+
+Чего **нет** и о чём стоит знать:
+
+- **Отзыв токенов.** JWT живёт до истечения срока (по умолчанию 60 минут).
+  Удалённый пользователь сохраняет доступ до конца этого срока.
+- **HTTPS.** Не настроен: подразумевается запуск на localhost или за
+  обратным прокси. При выносе наружу TLS обязателен.
+- **Смена пароля через интерфейс.** Пока только пересоздание пользователя.
+- **Лимит попыток входа** привязан к логину, а не к IP: распределённый
+  перебор по разным логинам им не отсекается.
+
+---
+
+## Структура
+
+```
+backend/
+├── alembic/           # миграции схемы БД
+├── app/
+│   ├── main.py         # сборка приложения, миграции при старте, сидер
+│   ├── config.py       # настройки (.env)
+│   ├── database.py     # подключение к БД
+│   ├── models/         # User, Scan, AllowedScope, AuditLog
+│   ├── schemas/        # Pydantic-схемы
+│   ├── auth/           # JWT + RBAC
+│   ├── security/       # scope, лимит входов, заголовки
+│   ├── scanner/        # движок: profiles, engine, parser, arp, privileges
+│   ├── analytics/      # diff между сканами, карта сети
+│   ├── reports/        # PDF через Jinja2 + WeasyPrint
+│   ├── tasks/          # celery_app, runner
+│   └── api/            # роуты
+└── tests/              # 82 теста
+```
+
+## Тесты
+
+```bash
+cd backend
+.venv/Scripts/python.exe -m pytest -q
+```
+
+Реальная сеть в тестах не сканируется: nmap замокан.
+
+---
+
+## Известные ограничения
+
+- **PDF-отчёты на Windows не собираются.** WeasyPrint 69 требует Pango ≥ 1.44;
+  GTK3-рантайм с gtkd.org несёт 1.42 и не подходит. В Docker Pango стоит
+  из коробки. Локально на Windows нужен MSYS2:
+  `pacman -S mingw-w64-x86_64-pango`. Без Pango эндпоинт отдаёт `503`
+  с объяснением, а не падает.
+- **ARP-discovery требует L2-доступа** к сканируемому сегменту. В Docker это
+  обеспечивается `network_mode: host`; в WSL2 нужен
+  `networkingMode=mirrored` в `.wslconfig`.
+- **Профили `discovery` и `full`** требуют прав администратора (raw-сокеты).
+
+## Происхождение кода
+
+См. [NOTICE](NOTICE) — что и откуда заимствовано, с разбором лицензий.
+Коротко: код ниоткуда не копировался, заимствованы подходы; из WebMap
+(GPL-3.0) не бралось ничего, кроме идей оформления.

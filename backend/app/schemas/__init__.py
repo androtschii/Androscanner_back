@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.models import Role, ScanProfile, ScanStatus
 
@@ -12,9 +12,14 @@ class Token(BaseModel):
 
 
 # ---- Users ----
+MIN_PASSWORD_LENGTH = 10
+
+
 class UserCreate(BaseModel):
-    username: str
-    password: str
+    username: str = Field(min_length=3, max_length=64)
+    # Минимум длины вместо требований к «сложности»: длина даёт больше
+    # стойкости, чем обязательная заглавная буква и спецсимвол (NIST 800-63B)
+    password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=128)
     role: Role = Role.viewer
 
 

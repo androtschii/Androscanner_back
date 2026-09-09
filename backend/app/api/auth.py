@@ -6,6 +6,11 @@ from app.auth.security import create_access_token, verify_password
 from app.database import get_db
 from app.models import AuditLog, User
 from app.schemas import Token
+from app.security.login_guard import (
+    assert_not_locked_out,
+    clear_failures,
+    record_failure,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -15,15 +20,25 @@ def login(
     form: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):
+    # Сначала проверяем лимит попыток — иначе перебор пароля ничем не ограничен
+    assert_not_locked_out(form.username, db)
+
     user = db.query(User).filter(User.username == form.username).first()
+
     if not user or not verify_password(form.password, user.hashed_password):
+        record_failure(form.username, db)
+        # Одинаковый ответ для несуществующего логина и неверного пароля:
+        # иначе по тексту ошибки можно перебрать список пользователей
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Неверный логин или пароль",
         )
+
     if not user.is_active:
+        record_failure(form.username, db)
         raise HTTPException(status_code=403, detail="Пользователь отключён")
 
+    clear_failures(form.username, db)
     db.add(AuditLog(user_id=user.id, action="login", detail=user.username))
     db.commit()
 

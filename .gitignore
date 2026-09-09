@@ -22,3 +22,6 @@ venv/
 .vscode/
 Thumbs.db
 desktop.ini
+
+# .env для docker-compose в корне репозитория
+/.env

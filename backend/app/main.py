@@ -10,6 +10,7 @@ from app.api import analytics, audit, auth, scans, scopes, users
 from app.config import settings
 from app.database import SessionLocal
 from app.seed import seed_admin
+from app.security.headers import SecurityHeadersMiddleware
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -33,6 +34,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Network Scanner API", version="0.1.0", lifespan=lifespan)
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

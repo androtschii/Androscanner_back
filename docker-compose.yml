@@ -1,9 +1,19 @@
+# Секреты берутся из файла .env рядом с этим docker-compose.yml.
+# Синтаксис ${VAR:?текст} останавливает запуск с внятной ошибкой, если
+# переменная не задана — это намеренно: молча подставленный дефолтный
+# ключ подписи опаснее, чем упавший старт.
+#
+# Быстрый старт:
+#   cp .env.example .env
+#   python -c "import secrets; print(secrets.token_hex(32))"   # в JWT_SECRET
+#   docker compose up --build
+
 services:
   db:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: scanner
-      POSTGRES_PASSWORD: scanner
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?задай POSTGRES_PASSWORD в .env}
       POSTGRES_DB: scanner
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -29,15 +39,18 @@ services:
 
   api:
     build: ./backend
+    # Только на localhost: панель управления сканером не должна
+    # оказаться доступной из сети по недосмотру
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       # API в обычной bridge-сети — обращается к сервисам по именам
-      DATABASE_URL: postgresql+psycopg://scanner:scanner@db:5432/scanner
+      DATABASE_URL: postgresql+psycopg://scanner:${POSTGRES_PASSWORD}@db:5432/scanner
       REDIS_URL: redis://redis:6379/0
-      JWT_SECRET: change_me_dev_secret
-      DEFAULT_ADMIN_USERNAME: admin
-      DEFAULT_ADMIN_PASSWORD: admin
+      JWT_SECRET: ${JWT_SECRET:?задай JWT_SECRET в .env — сгенерируй случайный}
+      DEFAULT_ADMIN_USERNAME: ${DEFAULT_ADMIN_USERNAME:-admin}
+      DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:?задай DEFAULT_ADMIN_PASSWORD в .env}
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:5173","http://127.0.0.1:5173"]}
       USE_CELERY: "true"
     depends_on:
       db:
@@ -47,16 +60,15 @@ services:
 
   worker:
     build: ./backend
-    # --pool=solo не нужен: внутри контейнера Linux, форк-пул работает штатно
     command: celery -A app.tasks.celery_app worker --loglevel=info --concurrency=2
     # host-сеть обязательна для ARP-discovery: в bridge-сети контейнер сидит
-    # в своей подсети и вашу локалку на L2 не видит. Плата за это — сервисы
+    # в своей подсети и локальную сеть на L2 не видит. Плата за это — сервисы
     # приходится звать через 127.0.0.1, а не по именам db/redis.
     network_mode: host
     environment:
-      DATABASE_URL: postgresql+psycopg://scanner:scanner@127.0.0.1:5432/scanner
+      DATABASE_URL: postgresql+psycopg://scanner:${POSTGRES_PASSWORD}@127.0.0.1:5432/scanner
       REDIS_URL: redis://127.0.0.1:6379/0
-      JWT_SECRET: change_me_dev_secret
+      JWT_SECRET: ${JWT_SECRET:?задай JWT_SECRET в .env}
       USE_CELERY: "true"
     # nmap умеет SYN-скан, ARP и определение ОС только с этими правами
     cap_add:
