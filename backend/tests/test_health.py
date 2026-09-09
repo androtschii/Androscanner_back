@@ -69,3 +69,51 @@ def test_missing_nmap_does_not_make_service_unhealthy(client):
 def test_health_response_is_not_cached(client):
     """Закэшированная проверка здоровья бесполезна."""
     assert client.get("/health").headers["Cache-Control"] == "no-store"
+
+
+# ── кэш проверки nmap ──
+
+
+def test_nmap_probe_is_cached(client):
+    """Конструктор PortScanner запускает nmap отдельным процессом (~290 мс).
+    Без кэша /health был самым медленным эндпоинтом приложения, а в Docker
+    healthcheck дёргает его каждые 15 секунд."""
+    from app.api import health as health_module
+
+    health_module._nmap_cache = None
+
+    with patch.object(health_module, "_probe_nmap", return_value=(True, "ok (7.80)")) as probe:
+        health_module._check_nmap()
+        health_module._check_nmap()
+        health_module._check_nmap()
+
+    probe.assert_called_once()
+
+
+def test_nmap_cache_expires(client):
+    """TTL, а не кэш навсегда: доустановленный nmap должен быть замечен."""
+    from app.api import health as health_module
+
+    health_module._nmap_cache = None
+
+    with patch.object(health_module, "_probe_nmap", return_value=(False, "не найден")) as probe:
+        health_module._check_nmap()
+        # Отматываем время за пределы TTL
+        stamp, value = health_module._nmap_cache
+        health_module._nmap_cache = (stamp - health_module.NMAP_CACHE_TTL - 1, value)
+        health_module._check_nmap()
+
+    assert probe.call_count == 2
+
+
+def test_health_endpoint_uses_cache(client):
+    """Два подряд запроса к /health не должны дважды запускать nmap."""
+    from app.api import health as health_module
+
+    health_module._nmap_cache = None
+
+    with patch.object(health_module, "_probe_nmap", return_value=(True, "ok")) as probe:
+        client.get("/health")
+        client.get("/health")
+
+    probe.assert_called_once()

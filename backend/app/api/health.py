@@ -5,6 +5,8 @@
 достучаться до базы, и сканы молча копятся в очереди.
 """
 
+import time
+
 from fastapi import APIRouter, Depends, Response, status
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -36,10 +38,7 @@ def _check_redis() -> tuple[bool, str]:
         return False, f"недоступен: {type(exc).__name__}"
 
 
-def _check_nmap() -> tuple[bool, str]:
-    """Без nmap сканирование невозможно, но API остаётся полезным:
-    результаты прошлых сканов, отчёты и аналитика работают. Поэтому
-    это предупреждение, а не отказ."""
+def _probe_nmap() -> tuple[bool, str]:
     try:
         import nmap
 
@@ -51,6 +50,36 @@ def _check_nmap() -> tuple[bool, str]:
         return True, f"ok ({scanner.nmap_version()[0]}.{scanner.nmap_version()[1]})"
     except Exception as exc:  # noqa: BLE001
         return False, f"не найден: {type(exc).__name__}"
+
+
+# Кэш проверки nmap: (момент проверки, результат)
+_nmap_cache: tuple[float, tuple[bool, str]] | None = None
+NMAP_CACHE_TTL = 60.0
+
+
+def _check_nmap() -> tuple[bool, str]:
+    """Без nmap сканирование невозможно, но API остаётся полезным:
+    результаты прошлых сканов, отчёты и аналитика работают. Поэтому
+    это предупреждение, а не отказ.
+
+    Результат кэшируется на минуту. Причина: конструктор PortScanner
+    запускает `nmap --version` ОТДЕЛЬНЫМ ПРОЦЕССОМ — это ~290 мс, из-за
+    чего /health оказывался самым медленным эндпоинтом приложения.
+    В Docker healthcheck ходит каждые 15 секунд, то есть четыре лишних
+    запуска процесса в минуту ради того, что на ходу не меняется.
+
+    TTL, а не кэш навсегда: если nmap доустановят при работающем
+    сервисе, проверка это заметит в течение минуты.
+    """
+    global _nmap_cache
+
+    now = time.monotonic()
+    if _nmap_cache is not None and now - _nmap_cache[0] < NMAP_CACHE_TTL:
+        return _nmap_cache[1]
+
+    result = _probe_nmap()
+    _nmap_cache = (now, result)
+    return result
 
 
 @router.get("/health")
