@@ -8,6 +8,8 @@ HTTP-слоя (из скрипта, из Celery-задачи, из консол�
 белого списка не уйдёт.
 """
 
+import ipaddress
+
 import nmap
 from sqlalchemy.orm import Session
 
@@ -21,6 +23,34 @@ from app.security.scope import assert_in_scope
 
 class ScannerError(RuntimeError):
     """Скан не удалось выполнить — текст пойдёт пользователю в поле result."""
+
+
+def _assert_size_is_sane(target: str, prof) -> None:
+    """Отказывает, если цель слишком велика для выбранного профиля.
+
+    Без этой проверки скан 10.0.0.0/8 профилем full (16.7 млн адресов
+    по 65535 портов) принимался бы молча, шёл бы часами, упёрся
+    в часовой лимит Celery и вернулся как failed без объяснения причины.
+    Лучше отказать сразу и сказать, что делать.
+    """
+    try:
+        network = ipaddress.ip_network(target, strict=False)
+    except ValueError:
+        # Сюда не дойти: assert_in_scope уже отсеял всё, что не IP и не CIDR
+        return
+
+    if network.num_addresses > prof.max_hosts:
+        # Разряды разделяем пробелом, как принято в русском. Через
+        # формат, а не replace(",", " ") по всей строке: тот заодно
+        # съедал бы обычные запятые предложения.
+        found = f"{network.num_addresses:,}".replace(",", " ")
+        allowed = f"{prof.max_hosts:,}".replace(",", " ")
+        raise ScannerError(
+            f"Цель {target} содержит {found} адресов, а профиль «{prof.name}» "
+            f"рассчитан максимум на {allowed}. Это {prof.description} — "
+            f"на таком объёме скан шёл бы часами и упёрся бы в лимит времени "
+            f"задачи. Раздели диапазон на части или возьми более лёгкий профиль."
+        )
 
 
 def _build_scanner() -> nmap.PortScanner:
@@ -42,6 +72,7 @@ def run_nmap_scan(target: str, profile: ScanProfile, db: Session) -> dict:
     assert_in_scope(target, db)
 
     prof = get_profile(profile)
+    _assert_size_is_sane(target, prof)
 
     if prof.requires_privilege and not has_raw_socket_privilege():
         raise ScannerError(

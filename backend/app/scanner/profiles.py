@@ -20,6 +20,11 @@ class Profile:
     arguments: str
     requires_privilege: bool
     description: str
+    # Предел размера цели. Стоимость профилей отличается на порядки:
+    # discovery шлёт по одному пакету на адрес, full — 65535 проб.
+    # Без предела скан 10.0.0.0/8 профилем full упёрся бы в часовой
+    # лимит Celery и вернулся бы как failed без внятной причины.
+    max_hosts: int
 
 
 PROFILES: dict[ScanProfile, Profile] = {
@@ -30,6 +35,9 @@ PROFILES: dict[ScanProfile, Profile] = {
         arguments="-sn -PR",
         requires_privilege=True,
         description="Поиск живых хостов в локальном сегменте через ARP",
+        # По пакету на адрес — /16 проходится за минуты.
+        # ARP всё равно не выходит за свой сегмент, так что запас щедрый.
+        max_hosts=65536,
     ),
     ScanProfile.quick: Profile(
         name="quick",
@@ -38,6 +46,8 @@ PROFILES: dict[ScanProfile, Profile] = {
         arguments="-sT -T4 --top-ports 100",
         requires_privilege=False,
         description="TCP connect-скан 100 самых популярных портов",
+        # 100 портов на адрес: /20 это 409 600 проб — уже десятки минут
+        max_hosts=4096,
     ),
     ScanProfile.full: Profile(
         name="full",
@@ -45,6 +55,8 @@ PROFILES: dict[ScanProfile, Profile] = {
         arguments="-sS -sV -O -T4 -p-",
         requires_privilege=True,
         description="SYN-скан всех 65535 портов с определением сервисов и ОС",
+        # 65535 портов на адрес: даже /24 это 16.7 млн проб, часы работы
+        max_hosts=256,
     ),
 }
 
