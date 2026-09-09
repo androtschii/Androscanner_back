@@ -13,6 +13,7 @@ class ScanStatus(str, enum.Enum):
     running = "running"
     done = "done"
     failed = "failed"
+    cancelled = "cancelled"  # отменён пользователем
 
 
 class ScanProfile(str, enum.Enum):
@@ -44,6 +45,9 @@ class Scan(Base):
         Enum(ScanStatus), default=ScanStatus.queued, index=True
     )
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"))
+    # Идентификатор задачи Celery — нужен, чтобы её можно было отозвать.
+    # Пусто, когда скан выполняется через BackgroundTasks (dev на Windows).
+    celery_task_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     result: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON с результатом
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
 

@@ -7,7 +7,7 @@ from app.models import AuditLog, Role, Scan, ScanStatus, User
 from app.reports import ReportError, render_scan_report
 from app.schemas import Page, ScanCreate, ScanOut, ScanSummary
 from app.security.scope import assert_in_scope
-from app.tasks import dispatch_scan
+from app.tasks import dispatch_scan, revoke_scan_task
 
 router = APIRouter(prefix="/scans", tags=["scans"])
 
@@ -111,3 +111,42 @@ def scan_report(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.post("/{scan_id}/cancel", response_model=ScanOut)
+def cancel_scan(
+    scan_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Отменяет скан. Может админ или тот, кто его запустил.
+
+    Viewer сюда не попадёт: он не может создавать сканы, значит и своих
+    у него нет, а чужие отменять права не имеет.
+    """
+    scan = db.get(Scan, scan_id)
+    if not scan:
+        raise HTTPException(status_code=404, detail="Не найден")
+
+    if user.role != Role.admin and scan.created_by != user.id:
+        raise HTTPException(
+            status_code=403, detail="Отменить можно только свой скан"
+        )
+
+    if scan.status in (ScanStatus.done, ScanStatus.failed, ScanStatus.cancelled):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Скан уже завершён со статусом «{scan.status.value}» — отменять нечего",
+        )
+
+    # Снимаем задачу с воркера, если она туда попала. В режиме
+    # BackgroundTasks отзывать нечего: задача проверит статус сама
+    # и выйдет, не начав сканировать.
+    if scan.celery_task_id:
+        revoke_scan_task(scan.celery_task_id)
+
+    scan.status = ScanStatus.cancelled
+    db.add(AuditLog(user_id=user.id, action="cancel_scan", detail=str(scan_id)))
+    db.commit()
+    db.refresh(scan)
+    return scan
