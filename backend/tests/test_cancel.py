@@ -190,3 +190,76 @@ def test_normal_scan_still_completes(client):
         execute_scan(scan_id)
 
     assert _status(scan_id) == ScanStatus.done
+
+
+# ── гонка при постановке в очередь ──
+
+
+def test_task_id_saved_before_queueing(client):
+    """Раньше delay() публиковал задачу, и только потом id сохранялся в базу.
+    В этом промежутке воркер уже мог взять задачу, а запрос на отмену —
+    увидеть celery_task_id = None и ничего не отозвать: скан помечался
+    отменённым, а nmap продолжал работать."""
+    from unittest.mock import MagicMock, patch
+
+    from app.tasks import runner
+
+    scan_id = _make_scan(ScanStatus.queued)
+    order = []
+
+    def remember_queueing(*_args, **_kwargs):
+        db = SessionLocal()
+        try:
+            # В момент постановки в очередь id уже обязан быть в базе
+            order.append(db.get(Scan, scan_id).celery_task_id)
+        finally:
+            db.close()
+
+    with patch.object(runner.settings, "use_celery", True):
+        with patch.object(runner.run_scan, "apply_async", side_effect=remember_queueing):
+            runner.dispatch_scan(scan_id, MagicMock())
+
+    assert order and order[0] is not None, "id задачи ещё не был записан в момент постановки"
+
+
+def test_dispatched_task_id_matches_stored(client):
+    """Сгенерированный id должен совпасть с тем, под которым задача ушла."""
+    from unittest.mock import MagicMock, patch
+
+    from app.tasks import runner
+
+    scan_id = _make_scan(ScanStatus.queued)
+    captured = {}
+
+    def capture(*_args, **kwargs):
+        captured["task_id"] = kwargs.get("task_id")
+
+    with patch.object(runner.settings, "use_celery", True):
+        with patch.object(runner.run_scan, "apply_async", side_effect=capture):
+            runner.dispatch_scan(scan_id, MagicMock())
+
+    db = SessionLocal()
+    try:
+        assert db.get(Scan, scan_id).celery_task_id == captured["task_id"]
+    finally:
+        db.close()
+
+
+def test_background_mode_does_not_set_task_id(client):
+    """В режиме BackgroundTasks отзывать нечего — id не нужен."""
+    from unittest.mock import MagicMock, patch
+
+    from app.tasks import runner
+
+    scan_id = _make_scan(ScanStatus.queued)
+    bg = MagicMock()
+
+    with patch.object(runner.settings, "use_celery", False):
+        runner.dispatch_scan(scan_id, bg)
+
+    bg.add_task.assert_called_once()
+    db = SessionLocal()
+    try:
+        assert db.get(Scan, scan_id).celery_task_id is None
+    finally:
+        db.close()

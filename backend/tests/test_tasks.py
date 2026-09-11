@@ -53,13 +53,32 @@ def test_dispatch_uses_background_tasks_when_celery_disabled():
     bg.add_task.assert_called_once_with(execute_scan, 42)
 
 
-def test_dispatch_uses_celery_when_enabled():
+def test_dispatch_uses_celery_when_enabled(client):
+    """Задача ставится через apply_async с заранее сгенерированным id,
+    а не через delay(): id должен попасть в базу ДО постановки в очередь,
+    иначе отмена в этом промежутке не смогла бы отозвать задачу."""
+    from app.database import SessionLocal
+    from app.models import Scan, ScanProfile, User
+    from app.tasks import runner
+
+    db = SessionLocal()
+    try:
+        admin = db.query(User).filter(User.username == "admin").first()
+        scan = Scan(target="192.168.1.99", profile=ScanProfile.quick, created_by=admin.id)
+        db.add(scan)
+        db.commit()
+        scan_id = scan.id
+    finally:
+        db.close()
+
     bg = MagicMock()
-    with patch("app.tasks.runner.settings") as cfg:
-        cfg.use_celery = True
-        with patch("app.tasks.runner.run_scan") as task:
-            dispatch_scan(42, bg)
-    task.delay.assert_called_once_with(42)
+    with patch.object(runner.settings, "use_celery", True):
+        with patch.object(runner.run_scan, "apply_async") as task:
+            runner.dispatch_scan(scan_id, bg)
+
+    task.assert_called_once()
+    assert task.call_args.kwargs["args"] == [scan_id]
+    assert task.call_args.kwargs["task_id"]
     bg.add_task.assert_not_called()
 
 

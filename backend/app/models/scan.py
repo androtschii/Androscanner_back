@@ -27,7 +27,11 @@ class AllowedScope(Base):
     __tablename__ = "allowed_scopes"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    cidr: Mapped[str] = mapped_column(String(64))  # напр. 192.168.1.0/24
+    # unique: дубликаты одной сети опасны — удалив одну запись, админ
+    # решил бы, что отозвал доступ, а вторая продолжала бы его разрешать.
+    # Значение всегда канонизировано (192.168.1.77/24 -> 192.168.1.0/24),
+    # иначе уникальность по строке ничего бы не гарантировала.
+    cidr: Mapped[str] = mapped_column(String(64), unique=True)
     description: Mapped[str] = mapped_column(String(255), default="")
     created_at: Mapped[datetime] = mapped_column(
         UTCDateTime, default=utcnow

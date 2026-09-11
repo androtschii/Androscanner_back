@@ -11,6 +11,7 @@ dispatch_scan по настройке USE_CELERY:
 """
 
 import json
+import uuid
 
 from fastapi import BackgroundTasks, HTTPException
 
@@ -77,19 +78,28 @@ def run_scan(scan_id: int) -> None:
 
 def dispatch_scan(scan_id: int, background_tasks: BackgroundTasks) -> None:
     """Ставит скан на выполнение выбранным способом."""
-    if settings.use_celery:
-        task = run_scan.delay(scan_id)
-        # Сохраняем id задачи: без него отозвать её потом будет нечем
-        db = SessionLocal()
-        try:
-            scan = db.get(Scan, scan_id)
-            if scan is not None:
-                scan.celery_task_id = task.id
-                db.commit()
-        finally:
-            db.close()
-    else:
+    if not settings.use_celery:
         background_tasks.add_task(execute_scan, scan_id)
+        return
+
+    # Идентификатор задачи генерируем САМИ и записываем ДО постановки
+    # в очередь. Раньше было наоборот: delay() публиковал задачу, и только
+    # потом id сохранялся в базу. В этом промежутке воркер уже мог взять
+    # задачу, а запрос на отмену — увидеть celery_task_id = None и ничего
+    # не отозвать: скан помечался отменённым, а nmap продолжал работать.
+    task_id = str(uuid.uuid4())
+
+    db = SessionLocal()
+    try:
+        scan = db.get(Scan, scan_id)
+        if scan is None:
+            return
+        scan.celery_task_id = task_id
+        db.commit()
+    finally:
+        db.close()
+
+    run_scan.apply_async(args=[scan_id], task_id=task_id)
 
 
 def revoke_scan_task(celery_task_id: str) -> bool:
