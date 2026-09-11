@@ -146,6 +146,10 @@ class DiffSummary(BaseModel):
 class ScanDiff(BaseModel):
     base: ScanSummary
     compare: ScanSummary
+    # true, если сканы были по разным целям. Сравнение тогда формально
+    # отработает, но «хост исчез / появился» будет означать лишь то,
+    # что сети разные, — фронтенд обязан это показать.
+    targets_differ: bool = False
     hosts_added: list[HostWithPorts]
     hosts_removed: list[HostWithPorts]
     host_changes: list[HostChange]

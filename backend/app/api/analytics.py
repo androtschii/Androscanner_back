@@ -111,6 +111,11 @@ def diff(
     return ScanDiff(
         base=base_scan,
         compare=compare_scan,
+        # Сравнивать сканы разных сетей формально можно, но результат
+        # введёт в заблуждение: все хосты одной окажутся «исчезнувшими»,
+        # все хосты другой — «появившимися». Отказывать не станем
+        # (иногда цель осознанно меняют), но предупредим.
+        targets_differ=base_scan.target != compare_scan.target,
         **diff_results(base_data, compare_data),
     )
 
