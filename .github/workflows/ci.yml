@@ -44,7 +44,9 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: backend/requirements.txt
+          cache-dependency-path: |
+            backend/requirements.txt
+            backend/requirements-dev.txt
 
       # nmap нужен тестам движка: они проверяют, что он находится.
       # Pango и шрифт — тестам PDF-отчётов. Сама сеть не сканируется.
@@ -58,7 +60,7 @@ jobs:
         working-directory: backend
         run: |
           pip install -r requirements.txt
-          pip install pytest
+          pip install -r requirements-dev.txt
 
       - name: Тесты на ${{ matrix.database.name }}
         working-directory: backend

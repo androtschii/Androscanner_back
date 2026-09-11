@@ -2,13 +2,11 @@ FROM python:3.12-slim
 
 # Системные зависимости:
 #   nmap                    — сам движок сканирования (без него воркер бесполезен)
-#   libcap2-bin             — setcap, чтобы nmap мог raw-сокеты без полного root
 #   libpango-1.0-0, ...     — WeasyPrint рендерит PDF через Pango и cairo
 #   fonts-dejavu-core       — шрифт из шаблона отчёта; без него кириллица
 #                             в PDF превратится в квадраты
 RUN apt-get update && apt-get install -y --no-install-recommends \
         nmap \
-        libcap2-bin \
         libpango-1.0-0 \
         libpangoft2-1.0-0 \
         libcairo2 \
@@ -16,11 +14,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
-# Позволяет nmap делать SYN-скан и ARP без запуска всего процесса от root.
-# Контейнеру всё равно нужен cap_add: NET_RAW/NET_ADMIN в docker-compose.
-RUN setcap cap_net_raw,cap_net_admin,cap_net_bind_service+eip /usr/lib/nmap/nmap \
-    || setcap cap_net_raw,cap_net_admin,cap_net_bind_service+eip /usr/bin/nmap \
-    || true
+# ВНИМАНИЕ: здесь стоял `setcap ...+eip` на nmap, и он ЛОМАЛ образ.
+#
+# Effective-права на файле требуют, чтобы контейнер мог их выдать. CAP_NET_ADMIN
+# в наборе Docker по умолчанию отсутствует, поэтому execve падал с EPERM
+# ещё до запуска программы:
+#
+#     exec /usr/bin/nmap: operation not permitted
+#
+# То есть nmap становился незапускаемым вообще — включая контейнер api,
+# где /health проверяет его наличие. Поймано в CI шагом «nmap внутри образа».
+#
+# Права nmap получает от процесса: контейнер работает от root, а воркеру
+# docker-compose выдаёт cap_add NET_RAW и NET_ADMIN. setcap понадобился бы
+# только при запуске от непривилегированного пользователя, чего здесь нет.
 
 WORKDIR /code
 
