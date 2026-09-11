@@ -114,9 +114,16 @@ def test_password_of_sufficient_length_accepted(client, admin_headers):
     )
     assert r.status_code == 200
 
+    # Зависимые записи убираем первыми: PostgreSQL проверяет внешние
+    # ключи всегда, SQLite по умолчанию — нет
     db = SessionLocal()
     try:
-        db.query(User).filter(User.username == "longpass").delete()
+        created = db.query(User).filter(User.username == "longpass").first()
+        if created is not None:
+            db.query(AuditLog).filter(AuditLog.user_id == created.id).delete(
+                synchronize_session=False
+            )
+            db.delete(created)
         db.commit()
     finally:
         db.close()

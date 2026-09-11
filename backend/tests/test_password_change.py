@@ -1,7 +1,7 @@
 """Тесты смены собственного пароля."""
 
 from app.database import SessionLocal
-from app.models import User
+from app.models import AuditLog, Scan, User
 
 
 def _make_user(client, admin_headers, username, password, role="viewer"):
@@ -16,9 +16,25 @@ def _make_user(client, admin_headers, username, password, role="viewer"):
 
 
 def _drop_user(username):
+    """Убирает тестового пользователя вместе с его следами в журнале.
+
+    Порядок важен: на PostgreSQL внешние ключи проверяются всегда, и
+    удаление пользователя с записями в audit_log падает с
+    ForeignKeyViolation. SQLite такие ограничения по умолчанию
+    игнорирует, поэтому локально это проходило, а в CI — нет.
+
+    В самом приложении пользователи не удаляются вовсе, а отключаются;
+    здесь удаление нужно только чтобы тесты не мешали друг другу."""
     db = SessionLocal()
     try:
-        db.query(User).filter(User.username == username).delete()
+        user = db.query(User).filter(User.username == username).first()
+        if user is None:
+            return
+        db.query(AuditLog).filter(AuditLog.user_id == user.id).delete(
+            synchronize_session=False
+        )
+        db.query(Scan).filter(Scan.created_by == user.id).delete(synchronize_session=False)
+        db.delete(user)
         db.commit()
     finally:
         db.close()
