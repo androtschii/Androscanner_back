@@ -30,7 +30,15 @@ def list_scans(
     if status is not None:
         query = query.filter(Scan.status == status)
     if target:
-        query = query.filter(Scan.target.contains(target))
+        # icontains вместо contains: LIKE регистрозависим в PostgreSQL
+        # и регистронезависим в SQLite, то есть один и тот же поиск давал
+        # бы разные результаты на разных базах. icontains ведёт себя
+        # одинаково на обеих.
+        #
+        # autoescape обязателен: без него поиск по «%» превращается
+        # в подстановочный знак и возвращает вообще всё, а «_»
+        # совпадает с любым символом.
+        query = query.filter(Scan.target.icontains(target, autoescape=True))
 
     total = query.count()
     items = query.order_by(Scan.created_at.desc()).offset(offset).limit(limit).all()

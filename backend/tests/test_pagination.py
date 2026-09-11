@@ -148,3 +148,52 @@ def test_audit_older_entries_reachable_by_offset(client, admin_headers):
         assert {e["id"] for e in first["items"]}.isdisjoint(
             {e["id"] for e in second["items"]}
         )
+
+
+# ── поиск: одинаковость на разных базах ──
+
+
+def test_search_is_case_insensitive(client, admin_headers):
+    """LIKE регистрозависим в PostgreSQL и регистронезависим в SQLite.
+    Один и тот же поиск давал бы разные результаты на разных базах,
+    поэтому используется icontains."""
+    db = SessionLocal()
+    try:
+        admin = db.query(User).filter(User.username == "admin").first()
+        db.add(Scan(target="HOST-ABC.local", profile=ScanProfile.quick, created_by=admin.id))
+        db.commit()
+    finally:
+        db.close()
+
+    body = client.get("/scans?target=host-abc&limit=200", headers=admin_headers).json()
+    assert any("HOST-ABC" in s["target"] for s in body["items"]), (
+        "поиск в другом регистре не нашёл цель"
+    )
+
+    db = SessionLocal()
+    try:
+        db.query(Scan).filter(Scan.target == "HOST-ABC.local").delete(synchronize_session=False)
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_percent_in_search_is_not_a_wildcard(client, admin_headers):
+    """Без экранирования поиск по «%» возвращал бы вообще все сканы."""
+    _seed_scans(5, target_prefix="198.51.100.")
+    everything = client.get("/scans?limit=200", headers=admin_headers).json()["total"]
+
+    body = client.get("/scans?target=%25&limit=200", headers=admin_headers).json()
+
+    assert body["total"] < everything, "«%» сработал как подстановочный знак"
+    _cleanup("198.51.100.")
+
+
+def test_underscore_in_search_is_not_a_wildcard(client, admin_headers):
+    """«_» в LIKE совпадает с любым одним символом."""
+    _seed_scans(3, target_prefix="203.0.113.")
+    body = client.get("/scans?target=203.0.113._&limit=200", headers=admin_headers).json()
+
+    # Цели вида 203.0.113.0 существуют, но буквального «_» в них нет
+    assert body["total"] == 0, "«_» сработал как подстановочный знак"
+    _cleanup("203.0.113.")

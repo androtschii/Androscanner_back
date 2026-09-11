@@ -202,7 +202,7 @@ backend/
 │   ├── reports/        # PDF через Jinja2 + WeasyPrint
 │   ├── tasks/          # celery_app, runner
 │   └── api/            # роуты
-└── tests/              # 165 тестов
+└── tests/              # 179 тестов
 ```
 
 ## Тесты
