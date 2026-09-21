@@ -10,12 +10,14 @@ WeasyPrint на Windows требует библиотек GTK (Pango, cairo). И
 """
 
 import json
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from app.models import Scan, ScanStatus
+from app.reports.charts import render_bar_chart_data_uri
 
 TEMPLATE_DIR = Path(__file__).resolve().parent
 
@@ -37,10 +39,12 @@ def _load_weasyprint():
         from weasyprint import HTML
     except OSError as exc:
         raise ReportError(
-            "PDF-отчёты требуют библиотеки Pango (версии 1.44 или новее), которой нет в системе. "
-            "В Docker она уже стоит — там отчёты работают. "
-            "Если нужен PDF локально на Windows: поставь MSYS2 и в нём "
-            "pacman -S mingw-w64-x86_64-pango, затем добавь его bin в PATH. "
+            "PDF-отчёты требуют библиотеки Pango (версии 1.44 или новее), которой нет в PATH "
+            "этого процесса. В Docker она уже стоит — там отчёты работают. "
+            "Проверено локально на Windows: MSYS2 + `pacman -S mingw-w64-x86_64-pango "
+            "mingw-w64-x86_64-cairo mingw-w64-x86_64-gdk-pixbuf2`, затем C:\\msys64\\mingw64\\bin "
+            "должен быть в PATH ДО запуска uvicorn (см. run-dev.ps1 — переменная окружения не "
+            "долетает, если процесс уже стартовал без нужного PATH). "
             "Учти: GTK3-рантайм с gtkd.org не подойдёт — он несёт Pango 1.42, "
             "слишком старый для WeasyPrint. "
             f"Исходная ошибка: {exc}"
@@ -76,7 +80,41 @@ def render_scan_html(scan: Scan, requested_by: str) -> str:
         error=error,
         requested_by=requested_by,
         generated_at=datetime.now(timezone.utc),
+        charts=_build_charts(result) if result else None,
     )
+
+
+def _build_charts(result: dict) -> dict[str, str] | None:
+    """Три графика по данным ЭТОГО скана — не по всей истории (это отдельная
+    сводка на дашборде): распределение хостов по статусам, топ сервисов,
+    топ открытых портов. Возвращает data-URI картинок для <img> в шаблоне.
+    """
+    hosts = result.get("hosts", [])
+    if not hosts:
+        return None
+
+    statuses = Counter(h.get("state", "unknown") for h in hosts)
+
+    services: Counter = Counter()
+    ports: Counter = Counter()
+    for host in hosts:
+        for port in host.get("ports", []):
+            if port.get("state") != "open":
+                continue
+            ports[f"{port['port']}/{port['protocol']}"] += 1
+            if port.get("service"):
+                services[port["service"]] += 1
+
+    if not ports:
+        # Хосты есть, открытых портов нет (например, профиль ping) —
+        # графики по портам и сервисам были бы пустыми прямоугольниками
+        return {"statuses": render_bar_chart_data_uri(statuses.most_common())}
+
+    return {
+        "statuses": render_bar_chart_data_uri(statuses.most_common()),
+        "services": render_bar_chart_data_uri(services.most_common(8)),
+        "ports": render_bar_chart_data_uri(ports.most_common(8)),
+    }
 
 
 def render_scan_report(scan: Scan, requested_by: str) -> bytes:

@@ -32,5 +32,10 @@ class Settings(BaseSettings):
     # CORS — домены фронтенда, которым разрешены запросы к API
     cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
 
+    # Уведомления в Telegram. Пусто = уведомления выключены — отсутствие
+    # бота не должно быть обязательным условием для работы сканера.
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
+
 
 settings = Settings()

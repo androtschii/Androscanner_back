@@ -62,6 +62,11 @@
     }
     table.data td.num { font-family: monospace; }
 
+    .charts { margin-bottom: 4mm; }
+    .chart-block { page-break-inside: avoid; margin-bottom: 4mm; }
+    .chart-title { font-size: 10pt; margin: 0 0 1mm; color: #333; }
+    img.chart { width: 100%; max-width: 160mm; display: block; }
+
     .host { margin-bottom: 5mm; page-break-inside: avoid; }
     .host-meta { font-size: 9pt; color: #444; margin-bottom: 1.5mm; }
     .host-meta span { margin-right: 6mm; }
@@ -119,6 +124,28 @@
   <p class="subtitle">
     Команда nmap: <code>{{ result.arguments }}</code>
   </p>
+
+  {% if charts %}
+  <h2>Графики</h2>
+  <div class="charts">
+    <div class="chart-block">
+      <h3 class="chart-title">Хосты по статусам</h3>
+      <img class="chart" src="{{ charts.statuses }}" alt="Хосты по статусам">
+    </div>
+    {% if charts.services %}
+    <div class="chart-block">
+      <h3 class="chart-title">Топ сервисов</h3>
+      <img class="chart" src="{{ charts.services }}" alt="Топ сервисов">
+    </div>
+    {% endif %}
+    {% if charts.ports %}
+    <div class="chart-block">
+      <h3 class="chart-title">Топ открытых портов</h3>
+      <img class="chart" src="{{ charts.ports }}" alt="Топ открытых портов">
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
 
   <h2>Хосты</h2>
 

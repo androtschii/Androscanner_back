@@ -17,9 +17,15 @@ class ScanStatus(str, enum.Enum):
 
 
 class ScanProfile(str, enum.Enum):
-    discovery = "discovery"   # только живые хосты
-    quick = "quick"           # top-ports
-    full = "full"             # полный скан
+    ping = "ping"             # только живые хосты, вообще без портов
+    discovery = "discovery"   # живые хосты через ARP (свой L2-сегмент)
+    quick = "quick"           # top-100 портов
+    top1000 = "top1000"       # top-1000 портов
+    version = "version"       # определение версий сервисов
+    udp = "udp"                # UDP-порты — то, что обычно забывают проверить
+    vuln = "vuln"              # скрипты поиска известных уязвимостей
+    full = "full"              # все 65535 портов + сервисы + ОС
+    aggressive = "aggressive"  # версии + ОС + скрипты + traceroute разом
 
 
 class AllowedScope(Base):
@@ -54,6 +60,11 @@ class Scan(Base):
     celery_task_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     result: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON с результатом
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+    # Когда скан в последний раз сменил статус. NULL, пока висит в queued —
+    # ничего ещё не произошло. Явно проставляется в runner.py и при отмене,
+    # а не через onupdate: так поведение одинаково на SQLite и PostgreSQL
+    # и его видно прямо в коде, а не в магии драйвера.
+    updated_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 
 
 # Пределы длины полей журнала. Держим рядом с валидатором, чтобы

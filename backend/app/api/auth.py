@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.auth.security import create_access_token, verify_password
 from app.database import get_db
 from app.models import AuditLog, User
+from app.notifications import notify_login, notify_login_failed
 from app.schemas import Token
 from app.security.login_guard import assert_not_locked_out, record_failure
 
@@ -23,6 +24,7 @@ def login(
 
     if not user or not verify_password(form.password, user.hashed_password):
         record_failure(form.username, db)
+        notify_login_failed(form.username)
         # Одинаковый ответ для несуществующего логина и неверного пароля:
         # иначе по тексту ошибки можно перебрать список пользователей
         raise HTTPException(
@@ -39,6 +41,7 @@ def login(
     # Удалять что-либо из журнала нельзя — он только пополняется.
     db.add(AuditLog(user_id=user.id, action="login", detail=user.username))
     db.commit()
+    notify_login(user.username, user.role.value)
 
     token = create_access_token(subject=user.username, role=user.role.value)
     return Token(access_token=token)

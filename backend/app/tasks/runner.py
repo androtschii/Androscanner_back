@@ -18,6 +18,8 @@ from fastapi import BackgroundTasks, HTTPException
 from app.config import settings
 from app.database import SessionLocal
 from app.models import Scan, ScanStatus
+from app.models.types import utcnow
+from app.notifications import notify_scan_finished
 from app.scanner import ScannerError, run_nmap_scan
 from app.tasks.celery_app import celery_app
 
@@ -38,6 +40,7 @@ def execute_scan(scan_id: int) -> None:
             return
 
         scan.status = ScanStatus.running
+        scan.updated_at = utcnow()
         db.commit()
 
         try:
@@ -66,8 +69,10 @@ def execute_scan(scan_id: int) -> None:
 
 def _finish(db, scan: Scan, status: ScanStatus, payload: dict) -> None:
     scan.status = status
+    scan.updated_at = utcnow()
     scan.result = json.dumps(payload, ensure_ascii=False)
     db.commit()
+    notify_scan_finished(scan.target, status.value, payload.get("stats", {}).get("hosts_up"))
 
 
 @celery_app.task(name="scan.run")

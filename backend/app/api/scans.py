@@ -4,6 +4,8 @@ from sqlalchemy.orm import Session
 from app.auth.deps import get_current_user, require_role
 from app.database import get_db
 from app.models import AuditLog, Role, Scan, ScanStatus, User
+from app.models.types import utcnow
+from app.notifications import notify_scan_finished, notify_scan_started
 from app.reports import ReportError, render_scan_report
 from app.schemas import Page, ScanCreate, ScanOut, ScanSummary
 from app.security.scope import assert_in_scope
@@ -72,6 +74,7 @@ def create_scan(
     db.add(AuditLog(user_id=user.id, action="create_scan", detail=payload.target))
     db.commit()
     db.refresh(scan)
+    notify_scan_started(user.username, payload.target, payload.profile.value)
 
     # Фаза 3 заменит диспетчер на Celery, тело задачи останется прежним
     dispatch_scan(scan.id, background_tasks)
@@ -154,7 +157,9 @@ def cancel_scan(
         revoke_scan_task(scan.celery_task_id)
 
     scan.status = ScanStatus.cancelled
+    scan.updated_at = utcnow()
     db.add(AuditLog(user_id=user.id, action="cancel_scan", detail=str(scan_id)))
     db.commit()
     db.refresh(scan)
+    notify_scan_finished(scan.target, "cancelled")
     return scan

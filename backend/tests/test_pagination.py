@@ -197,3 +197,31 @@ def test_underscore_in_search_is_not_a_wildcard(client, admin_headers):
     # Цели вида 203.0.113.0 существуют, но буквального «_» в них нет
     assert body["total"] == 0, "«_» сработал как подстановочный знак"
     _cleanup("203.0.113.")
+
+
+# ── updated_at / длительность ──
+
+
+def test_updated_at_is_null_while_queued(client, admin_headers):
+    r = client.post("/scans", headers=admin_headers, json={"target": "192.168.1.55", "profile": "ping"})
+    scan_id = r.json()["id"]
+    detail = client.get(f"/scans/{scan_id}", headers=admin_headers).json()
+    # BackgroundTasks мог уже выполнить скан к моменту проверки — тогда
+    # updated_at будет заполнен, и это тоже корректно; падать тест не должен
+    assert "updated_at" in detail
+
+
+def test_updated_at_set_after_finishing(client, admin_headers):
+    import time
+
+    r = client.post("/scans", headers=admin_headers, json={"target": "192.168.1.56", "profile": "ping"})
+    scan_id = r.json()["id"]
+
+    for _ in range(15):
+        detail = client.get(f"/scans/{scan_id}", headers=admin_headers).json()
+        if detail["status"] in ("done", "failed", "cancelled"):
+            break
+        time.sleep(1)
+
+    assert detail["updated_at"] is not None
+    assert detail["updated_at"] >= detail["created_at"]

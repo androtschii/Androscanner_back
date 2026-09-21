@@ -84,6 +84,10 @@ class ScanSummary(BaseModel):
     profile: ScanProfile
     status: ScanStatus
     created_by: int
+    # NULL, пока скан висит в queued — ничего ещё не произошло с момента
+    # создания. Нужен для длительности: created_at сам по себе показывает
+    # только момент постановки в очередь, не то, сколько скан шёл.
+    updated_at: datetime | None = None
     created_at: datetime
 
 
