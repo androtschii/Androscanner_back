@@ -18,6 +18,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from app.models import Scan, ScanStatus
 from app.reports.charts import render_bar_chart_data_uri
+from app.scanner.risk import assess_port_risk
 
 TEMPLATE_DIR = Path(__file__).resolve().parent
 
@@ -30,6 +31,7 @@ _env = Environment(
     loader=FileSystemLoader(TEMPLATE_DIR),
     autoescape=select_autoescape(["html"]),
 )
+_env.globals["assess_port_risk"] = assess_port_risk
 
 
 def _load_weasyprint():

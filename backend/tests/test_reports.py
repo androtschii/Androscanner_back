@@ -107,6 +107,28 @@ def test_html_escapes_hostile_hostname():
     assert "&lt;script&gt;" in html
 
 
+def test_html_flags_risky_open_port():
+    result = _good_result()
+    result["hosts"][0]["ports"].append(
+        {"port": 23, "protocol": "tcp", "state": "open", "service": "telnet",
+         "product": "", "version": "", "cpe": []}
+    )
+    html = render_scan_html(_scan(result=result), "admin")
+    assert 'class="risk-badge risk-high"' in html
+    assert "текстом" in html
+
+
+def test_html_does_not_flag_closed_risky_port():
+    """Закрытый порт неэксплуатируем — бейдж риска был бы ложной тревогой."""
+    result = _good_result()
+    result["hosts"][0]["ports"].append(
+        {"port": 23, "protocol": "tcp", "state": "closed", "service": "telnet",
+         "product": "", "version": "", "cpe": []}
+    )
+    html = render_scan_html(_scan(result=result), "admin")
+    assert 'class="risk-badge' not in html
+
+
 # ── обработка отсутствия GTK ──
 
 

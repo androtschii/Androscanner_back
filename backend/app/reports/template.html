@@ -74,6 +74,18 @@
     .open { font-weight: 600; }
     .closed { color: #777; }
 
+    .risk-badge {
+      display: inline-block;
+      font-size: 8pt;
+      font-weight: 600;
+      padding: 0.5pt 3pt;
+      border-radius: 2pt;
+      margin-left: 2mm;
+    }
+    .risk-high { background: #fdf3f3; color: #a3231f; border: 0.5pt solid #d99; }
+    .risk-medium { background: #fdf8ee; color: #8a5a00; border: 0.5pt solid #e0c98a; }
+    .risk-reason { font-size: 8pt; color: #777; font-style: italic; border-top: none; }
+
     .empty { color: #777; font-style: italic; }
 
     .failed {
@@ -173,12 +185,26 @@
           </thead>
           <tbody>
             {% for port in host.ports %}
+              {% set risk = assess_port_risk(port.port, port.service) if port.state == 'open' else None %}
               <tr>
                 <td class="num">{{ port.port }}/{{ port.protocol }}</td>
                 <td class="{{ 'open' if port.state == 'open' else 'closed' }}">{{ port.state }}</td>
-                <td>{{ port.service or "—" }}</td>
+                <td>
+                  {{ port.service or "—" }}
+                  {% if risk %}
+                    <span class="risk-badge risk-{{ risk.level }}" title="{{ risk.reason }}">
+                      {{ "⚠ высокий риск" if risk.level == "high" else "⚠ стоит проверить" }}
+                    </span>
+                  {% endif %}
+                </td>
                 <td>{{ (port.product ~ " " ~ port.version) | trim or "—" }}</td>
               </tr>
+              {% if risk %}
+                <tr>
+                  <td></td>
+                  <td colspan="3" class="risk-reason">{{ risk.reason }}</td>
+                </tr>
+              {% endif %}
             {% endfor %}
           </tbody>
         </table>
