@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import analytics, audit, auth, health, scans, scopes, users
 from app.config import settings
 from app.database import SessionLocal
+from app.notifications import bot as telegram_bot
 from app.seed import seed_admin
 from app.security.headers import SecurityHeadersMiddleware
 
@@ -30,7 +31,9 @@ async def lifespan(app: FastAPI):
         seed_admin(db)
     finally:
         db.close()
+    telegram_bot.start()
     yield
+    telegram_bot.stop()
 
 
 app = FastAPI(title="Network Scanner API", version="0.1.0", lifespan=lifespan)

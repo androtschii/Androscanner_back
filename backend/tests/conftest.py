@@ -16,6 +16,12 @@ os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL", _default_db)
 os.environ["JWT_SECRET"] = "test-secret-only-for-pytest-not-for-production"
 os.environ["DEFAULT_ADMIN_USERNAME"] = "admin"
 os.environ["DEFAULT_ADMIN_PASSWORD"] = "admin"
+# Иначе локально (где в .env лежит настоящий токен) TestClient поднял бы
+# реальный long polling бота — и он конфликтовал бы с уже запущенным
+# dev-сервером за тот же getUpdates (Telegram не даёт двум пуллерам
+# читать один и тот же токен одновременно).
+os.environ["TELEGRAM_BOT_TOKEN"] = ""
+os.environ["TELEGRAM_CHAT_ID"] = ""
 
 import pytest
 from fastapi.testclient import TestClient
