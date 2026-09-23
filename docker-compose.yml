@@ -52,6 +52,10 @@ services:
       DEFAULT_ADMIN_PASSWORD: ${DEFAULT_ADMIN_PASSWORD:?задай DEFAULT_ADMIN_PASSWORD в .env}
       CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:5173","http://127.0.0.1:5173"]}
       USE_CELERY: "true"
+      # Пусто = уведомления и команды бота выключены — оба необязательны,
+      # см. Androscanner_back/README.md «Уведомления в Telegram»
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
     # Теперь /health реально проверяет БД и Redis, поэтому на него
     # можно опираться, а не только на «процесс жив»
     healthcheck:
@@ -65,6 +69,22 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  web:
+    # Сосед по каталогу: оба репозитория клонируются рядом друг с другом
+    # (см. корневой README) — здесь так же, как api ссылается на ./backend.
+    build:
+      context: ../Androscanner_front
+      args:
+        # Адрес API вшивается в бандл на сборке (Vite), поменять после
+        # уже нельзя. Для демо по локальной сети переопредели в .env на
+        # LAN-адрес этой машины и открой api не только на 127.0.0.1 —
+        # см. Androscanner_front/README.md.
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    ports:
+      - "127.0.0.1:5173:80"
+    depends_on:
+      - api
 
   worker:
     build: ./backend
