@@ -16,6 +16,7 @@ SQLAlchemy Session), и мешать её с event loop без блокиров�
 """
 
 import logging
+import socket
 import threading
 import time
 
@@ -43,14 +44,42 @@ STATUS_LIMIT = 5
 COMMANDS = [
     ("status", "последние сканы, с кнопками на отчёт"),
     ("report", "PDF-отчёт по номеру: /report 7"),
+    ("ip", "текущий IP этой машины в сети"),
     ("help", "список команд"),
 ]
 
 HELP_TEXT = (
     "Доступные команды:\n"
     "/status — последние сканы\n"
-    "/report &lt;id&gt; — PDF-отчёт по скану"
+    "/report &lt;id&gt; — PDF-отчёт по скану\n"
+    "/ip — текущий IP этой машины в сети"
 )
+
+
+def _detect_local_ip() -> str | None:
+    """IP, который эта машина использует для исходящих соединений — тот
+    самый адрес, что нужно прописывать в VITE_API_URL/allowed-scope
+    после смены сети (Wi-Fi ↔ Ethernet, другая точка доступа и т.п.).
+
+    Реального соединения не открывается — UDP connect() на сокете только
+    выбирает исходящий интерфейс по таблице маршрутизации, ни один пакет
+    никуда не уходит. Тот же приём, которым для этого пользуются сами
+    сетевые утилиты.
+    """
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except OSError:
+        return None
+
+
+def _handle_ip() -> None:
+    ip = _detect_local_ip()
+    if ip:
+        send_message(f"🖥 IP этой машины в текущей сети: <code>{ip}</code>")
+    else:
+        send_message("Не удалось определить IP — сеть недоступна")
 
 
 def _format_status(scans: list[Scan]) -> str:
@@ -127,6 +156,8 @@ def _handle_command(text: str) -> None:
         _handle_status()
     elif command == "/report":
         _handle_report(arg)
+    elif command == "/ip":
+        _handle_ip()
     elif command in ("/start", "/help"):
         send_message(HELP_TEXT)
     else:

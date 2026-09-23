@@ -132,6 +132,37 @@ def test_handle_report_failed_send_notifies_user(client, admin_headers, home_sco
     assert send.called
 
 
+# ── /ip ──
+
+
+def test_detect_local_ip_returns_an_address():
+    """Реальный вызов — не мокаем сокет: проверяем только форму ответа,
+    не конкретное значение (оно зависит от сети машины, на которой
+    гоняются тесты)."""
+    ip = bot._detect_local_ip()
+    assert ip is None or ip.count(".") == 3
+
+
+def test_handle_ip_reports_detected_address():
+    with patch("app.notifications.bot._detect_local_ip", return_value="192.168.1.50"):
+        with patch("app.notifications.bot.send_message") as send:
+            bot._handle_ip()
+    assert "192.168.1.50" in send.call_args[0][0]
+
+
+def test_handle_ip_reports_failure_when_undetectable():
+    with patch("app.notifications.bot._detect_local_ip", return_value=None):
+        with patch("app.notifications.bot.send_message") as send:
+            bot._handle_ip()
+    assert "не удалось" in send.call_args[0][0].lower()
+
+
+def test_handle_command_dispatches_ip():
+    with patch("app.notifications.bot._handle_ip") as h:
+        bot._handle_command("/ip")
+    h.assert_called_once()
+
+
 # ── диспетчер команд ──
 
 
