@@ -48,6 +48,41 @@ def test_handle_status_lists_recent_scans(client, admin_headers, home_scope):
     assert "192.168.1.50" in text
 
 
+def test_status_keyboard_has_button_per_done_scan():
+    scan_id = _make_scan(status=ScanStatus.done)
+    db = SessionLocal()
+    try:
+        scans = db.query(Scan).filter(Scan.id == scan_id).all()
+    finally:
+        db.close()
+
+    keyboard = bot._status_keyboard(scans)
+    assert keyboard["inline_keyboard"] == [
+        [{"text": f"📄 Отчёт #{scan_id}", "callback_data": f"report:{scan_id}"}]
+    ]
+
+
+def test_status_keyboard_skips_unfinished_scans():
+    scan_id = _make_scan(status=ScanStatus.running)
+    db = SessionLocal()
+    try:
+        scans = db.query(Scan).filter(Scan.id == scan_id).all()
+    finally:
+        db.close()
+
+    assert bot._status_keyboard(scans) is None
+
+
+def test_handle_status_sends_keyboard(client, admin_headers, home_scope):
+    scan_id = _make_scan(status=ScanStatus.done)
+    with patch("app.notifications.bot.send_message") as send:
+        bot._handle_status()
+
+    keyboard = send.call_args.kwargs["reply_markup"]
+    buttons = [b["callback_data"] for row in keyboard["inline_keyboard"] for b in row]
+    assert f"report:{scan_id}" in buttons
+
+
 # ── /report ──
 
 
@@ -124,6 +159,33 @@ def test_handle_command_help_for_unknown():
     assert "команда" in send.call_args[0][0].lower()
 
 
+# ── нажатие inline-кнопки ──
+
+
+def test_handle_callback_triggers_report():
+    with patch("app.notifications.bot._handle_report") as report:
+        with patch("app.notifications.bot.answer_callback_query") as ack:
+            bot._handle_callback({"id": "cb1", "data": "report:42"})
+
+    report.assert_called_once_with("42")
+    ack.assert_called_once_with("cb1")
+
+
+def test_handle_callback_ignores_non_numeric_id():
+    with patch("app.notifications.bot._handle_report") as report:
+        with patch("app.notifications.bot.answer_callback_query") as ack:
+            bot._handle_callback({"id": "cb1", "data": "report:abc"})
+
+    report.assert_not_called()
+    assert ack.call_args.kwargs["text"] == "Неизвестное действие"
+
+
+def test_handle_callback_unknown_action_does_not_crash():
+    with patch("app.notifications.bot.answer_callback_query") as ack:
+        bot._handle_callback({"id": "cb1", "data": "banana:1"})
+    ack.assert_called_once()
+
+
 # ── long polling: продвижение offset ──
 
 
@@ -160,3 +222,13 @@ def test_start_is_noop_when_not_configured():
     dev-сервером, если тот запущен параллельно."""
     bot.start()
     assert bot._thread is None or not bot._thread.is_alive()
+
+
+def test_start_registers_command_menu_when_configured():
+    with patch("app.notifications.bot.is_configured", return_value=True):
+        with patch("app.notifications.bot.set_commands") as set_cmds:
+            with patch("app.notifications.bot.threading.Thread") as thread_cls:
+                bot.start()
+
+    set_cmds.assert_called_once_with(bot.COMMANDS)
+    thread_cls.assert_called_once()

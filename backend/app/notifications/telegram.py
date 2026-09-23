@@ -24,26 +24,61 @@ def is_configured() -> bool:
     return bool(settings.telegram_bot_token and settings.telegram_chat_id)
 
 
-def send_message(text: str) -> None:
+def send_message(text: str, reply_markup: dict | None = None) -> None:
     """Отправляет текст в чат. Ошибки только логируются — Telegram лежит
     или токен неверный не должны ронять запрос, который вызвал уведомление.
+
+    reply_markup — inline-кнопки под сообщением (см. _keyboard в bot.py),
+    например «📄 Отчёт #7» вместо необходимости набирать /report 7 руками.
     """
     if not is_configured():
         return
 
     url = f"{API_BASE}/bot{settings.telegram_bot_token}/sendMessage"
+    payload = {
+        "chat_id": settings.telegram_chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    try:
+        httpx.post(url, json=payload, timeout=TIMEOUT)
+    except httpx.HTTPError as exc:
+        logger.warning("Не удалось отправить уведомление в Telegram: %s", exc)
+
+
+def answer_callback_query(callback_query_id: str, text: str = "") -> None:
+    """Убирает «часики» с нажатой inline-кнопки. Без этого вызова кнопка
+    в клиенте Telegram виснет в состоянии ожидания до таймаута."""
+    if not is_configured():
+        return
+    url = f"{API_BASE}/bot{settings.telegram_bot_token}/answerCallbackQuery"
     try:
         httpx.post(
             url,
-            json={
-                "chat_id": settings.telegram_chat_id,
-                "text": text,
-                "parse_mode": "HTML",
-            },
+            json={"callback_query_id": callback_query_id, "text": text},
             timeout=TIMEOUT,
         )
     except httpx.HTTPError as exc:
-        logger.warning("Не удалось отправить уведомление в Telegram: %s", exc)
+        logger.warning("Не удалось ответить на нажатие кнопки: %s", exc)
+
+
+def set_commands(commands: list[tuple[str, str]]) -> None:
+    """Регистрирует список команд для встроенного меню Telegram (иконка
+    «/» рядом с полем ввода) — вызывается один раз при старте бота.
+    """
+    if not is_configured():
+        return
+    url = f"{API_BASE}/bot{settings.telegram_bot_token}/setMyCommands"
+    try:
+        httpx.post(
+            url,
+            json={"commands": [{"command": c, "description": d} for c, d in commands]},
+            timeout=TIMEOUT,
+        )
+    except httpx.HTTPError as exc:
+        logger.warning("Не удалось зарегистрировать меню команд: %s", exc)
 
 
 def send_document(filename: str, content: bytes, caption: str = "", chat_id: str | None = None) -> bool:

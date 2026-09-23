@@ -23,14 +23,28 @@ import httpx
 
 from app.config import settings
 from app.database import SessionLocal
-from app.models import AuditLog, Scan
-from app.notifications.telegram import is_configured, send_document, send_message
+from app.models import AuditLog, Scan, ScanStatus
+from app.notifications.telegram import (
+    answer_callback_query,
+    is_configured,
+    send_document,
+    send_message,
+    set_commands,
+)
 from app.reports import ReportError, render_scan_report
 
 logger = logging.getLogger(__name__)
 
 API_BASE = "https://api.telegram.org"
 STATUS_LIMIT = 5
+
+# Показывается во встроенном меню Telegram (иконка «/» рядом с полем ввода) —
+# регистрируется один раз при старте, см. start().
+COMMANDS = [
+    ("status", "последние сканы, с кнопками на отчёт"),
+    ("report", "PDF-отчёт по номеру: /report 7"),
+    ("help", "список команд"),
+]
 
 HELP_TEXT = (
     "Доступные команды:\n"
@@ -48,11 +62,23 @@ def _format_status(scans: list[Scan]) -> str:
     return "\n".join(lines)
 
 
+def _status_keyboard(scans: list[Scan]) -> dict | None:
+    """Кнопка «Отчёт #N» под каждым завершённым сканом — нажал и получил
+    PDF, не набирая /report <id> руками. Для незавершённых сканов кнопки
+    нет: отчёт по ним всё равно ничего не покажет."""
+    rows = [
+        [{"text": f"📄 Отчёт #{s.id}", "callback_data": f"report:{s.id}"}]
+        for s in scans
+        if s.status == ScanStatus.done
+    ]
+    return {"inline_keyboard": rows} if rows else None
+
+
 def _handle_status() -> None:
     db = SessionLocal()
     try:
         scans = db.query(Scan).order_by(Scan.created_at.desc()).limit(STATUS_LIMIT).all()
-        send_message(_format_status(scans))
+        send_message(_format_status(scans), reply_markup=_status_keyboard(scans))
     finally:
         db.close()
 
@@ -107,6 +133,19 @@ def _handle_command(text: str) -> None:
         send_message(f"Неизвестная команда. {HELP_TEXT}")
 
 
+def _handle_callback(callback_query: dict) -> None:
+    """Нажатие inline-кнопки под /status («📄 Отчёт #N»)."""
+    data = callback_query.get("data", "")
+    callback_id = callback_query["id"]
+
+    command, _, arg = data.partition(":")
+    if command == "report" and arg.isdigit():
+        _handle_report(arg)
+        answer_callback_query(callback_id)
+    else:
+        answer_callback_query(callback_id, text="Неизвестное действие")
+
+
 def _poll_once(client: httpx.Client, offset: int) -> tuple[int, list[dict]]:
     url = f"{API_BASE}/bot{settings.telegram_bot_token}/getUpdates"
     r = client.get(url, params={"offset": offset, "timeout": 25})
@@ -132,20 +171,23 @@ def _poll_loop(stop_event: threading.Event) -> None:
                 continue
 
             for update in updates:
-                message = update.get("message") or {}
-                text = message.get("text")
+                callback_query = update.get("callback_query")
+                message = (callback_query or {}).get("message") or update.get("message") or {}
                 chat_id = message.get("chat", {}).get("id")
-                if not text:
-                    continue
+
                 # Отвечаем только своему chat_id — у бота нет ролей,
-                # и это единственная граница доступа к его командам.
+                # и это единственная граница доступа к его командам и кнопкам.
                 if str(chat_id) != str(settings.telegram_chat_id):
-                    logger.warning("Команда от чужого chat_id %s проигнорирована", chat_id)
+                    logger.warning("Обращение от чужого chat_id %s проигнорировано", chat_id)
                     continue
+
                 try:
-                    _handle_command(text)
+                    if callback_query:
+                        _handle_callback(callback_query)
+                    elif update.get("message", {}).get("text"):
+                        _handle_command(update["message"]["text"])
                 except Exception:
-                    logger.exception("Ошибка обработки команды Telegram: %s", text)
+                    logger.exception("Ошибка обработки обновления Telegram: %s", update)
 
 
 _thread: threading.Thread | None = None
@@ -157,6 +199,7 @@ def start() -> None:
     global _thread
     if not is_configured():
         return
+    set_commands(COMMANDS)
     _stop_event.clear()
     _thread = threading.Thread(target=_poll_loop, args=(_stop_event,), daemon=True, name="telegram-bot-poll")
     _thread.start()

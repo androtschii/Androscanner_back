@@ -71,3 +71,60 @@ def test_notify_login_formats_message():
     with patch("app.notifications.telegram.send_message") as send:
         telegram.notify_login("admin", "admin")
     assert "admin" in send.call_args[0][0]
+
+
+# ── меню команд и inline-кнопки ──
+
+
+def test_send_message_includes_reply_markup_when_given():
+    keyboard = {"inline_keyboard": [[{"text": "x", "callback_data": "y"}]]}
+    with patch.object(settings, "telegram_bot_token", "123:ABC"):
+        with patch.object(settings, "telegram_chat_id", "42"):
+            with patch("app.notifications.telegram.httpx.post") as post:
+                telegram.send_message("привет", reply_markup=keyboard)
+
+    assert post.call_args[1]["json"]["reply_markup"] == keyboard
+
+
+def test_send_message_omits_reply_markup_when_not_given():
+    with patch.object(settings, "telegram_bot_token", "123:ABC"):
+        with patch.object(settings, "telegram_chat_id", "42"):
+            with patch("app.notifications.telegram.httpx.post") as post:
+                telegram.send_message("привет")
+
+    assert "reply_markup" not in post.call_args[1]["json"]
+
+
+def test_set_commands_noop_when_not_configured():
+    with patch.object(settings, "telegram_bot_token", ""):
+        with patch("app.notifications.telegram.httpx.post") as post:
+            telegram.set_commands([("status", "описание")])
+    post.assert_not_called()
+
+
+def test_set_commands_posts_command_list():
+    with patch.object(settings, "telegram_bot_token", "123:ABC"):
+        with patch.object(settings, "telegram_chat_id", "42"):
+            with patch("app.notifications.telegram.httpx.post") as post:
+                telegram.set_commands([("status", "последние сканы")])
+
+    body = post.call_args[1]["json"]
+    assert body["commands"] == [{"command": "status", "description": "последние сканы"}]
+
+
+def test_answer_callback_query_noop_when_not_configured():
+    with patch.object(settings, "telegram_bot_token", ""):
+        with patch("app.notifications.telegram.httpx.post") as post:
+            telegram.answer_callback_query("cb1")
+    post.assert_not_called()
+
+
+def test_answer_callback_query_posts_id():
+    with patch.object(settings, "telegram_bot_token", "123:ABC"):
+        with patch.object(settings, "telegram_chat_id", "42"):
+            with patch("app.notifications.telegram.httpx.post") as post:
+                telegram.answer_callback_query("cb1", text="готово")
+
+    body = post.call_args[1]["json"]
+    assert body["callback_query_id"] == "cb1"
+    assert body["text"] == "готово"
