@@ -74,12 +74,26 @@ def _detect_local_ip() -> str | None:
         return None
 
 
+# Порт dev-сервера фронтенда (Vite) по умолчанию — см. README обоих
+# репозиториев. Ссылка сработает только если фронтенд запущен с --host
+# (слушает 0.0.0.0, а не только localhost) — без этого сайт снаружи не
+# виден, каким бы верным ни был IP.
+FRONTEND_PORT = 5173
+
+
 def _handle_ip() -> None:
     ip = _detect_local_ip()
-    if ip:
-        send_message(f"🖥 IP этой машины в текущей сети: <code>{ip}</code>")
-    else:
+    if not ip:
         send_message("Не удалось определить IP — сеть недоступна")
+        return
+
+    url = f"http://{ip}:{FRONTEND_PORT}"
+    send_message(
+        f"🖥 IP этой машины в текущей сети: <code>{ip}</code>\n"
+        f'📱 Открыть сайт с телефона: <a href="{url}">{url}</a>\n\n'
+        "Работает, только если фронтенд запущен с --host и телефон "
+        "в той же сети."
+    )
 
 
 def _format_status(scans: list[Scan]) -> str:

@@ -150,6 +150,14 @@ def test_handle_ip_reports_detected_address():
     assert "192.168.1.50" in send.call_args[0][0]
 
 
+def test_handle_ip_includes_clickable_frontend_link():
+    with patch("app.notifications.bot._detect_local_ip", return_value="192.168.1.50"):
+        with patch("app.notifications.bot.send_message") as send:
+            bot._handle_ip()
+    text = send.call_args[0][0]
+    assert f"http://192.168.1.50:{bot.FRONTEND_PORT}" in text
+
+
 def test_handle_ip_reports_failure_when_undetectable():
     with patch("app.notifications.bot._detect_local_ip", return_value=None):
         with patch("app.notifications.bot.send_message") as send:
