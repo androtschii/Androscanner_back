@@ -5,7 +5,9 @@
 по умолчанию — тесты проверяют это как штатный случай, а не как ошибку.
 """
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+
+import httpx as httpx_module
 
 from app.config import settings
 from app.notifications import telegram
@@ -128,3 +130,42 @@ def test_answer_callback_query_posts_id():
     body = post.call_args[1]["json"]
     assert body["callback_query_id"] == "cb1"
     assert body["text"] == "готово"
+
+
+def test_edit_message_noop_when_not_configured():
+    with patch.object(settings, "telegram_bot_token", ""):
+        with patch("app.notifications.telegram.httpx.post") as post:
+            telegram.edit_message(1, "текст")
+    post.assert_not_called()
+
+
+def test_edit_message_posts_message_id_and_text():
+    keyboard = {"inline_keyboard": [[{"text": "X", "callback_data": "ttt:0"}]]}
+    with patch.object(settings, "telegram_bot_token", "123:ABC"):
+        with patch.object(settings, "telegram_chat_id", "42"):
+            with patch("app.notifications.telegram.httpx.post") as post:
+                telegram.edit_message(777, "твой ход", reply_markup=keyboard)
+
+    body = post.call_args[1]["json"]
+    assert body["message_id"] == 777
+    assert body["text"] == "твой ход"
+    assert body["reply_markup"] == keyboard
+
+
+def test_send_message_returns_message_id():
+    fake_response = MagicMock()
+    fake_response.json.return_value = {"result": {"message_id": 123}}
+    with patch.object(settings, "telegram_bot_token", "123:ABC"):
+        with patch.object(settings, "telegram_chat_id", "42"):
+            with patch("app.notifications.telegram.httpx.post", return_value=fake_response):
+                assert telegram.send_message("привет") == 123
+
+
+def test_send_message_returns_none_on_error():
+    with patch.object(settings, "telegram_bot_token", "123:ABC"):
+        with patch.object(settings, "telegram_chat_id", "42"):
+            with patch(
+                "app.notifications.telegram.httpx.post",
+                side_effect=httpx_module.ConnectError("недоступен"),
+            ):
+                assert telegram.send_message("привет") is None

@@ -171,6 +171,78 @@ def test_handle_command_dispatches_ip():
     h.assert_called_once()
 
 
+# ── крестики-нолики ──
+
+
+def test_tictactoe_starts_new_game():
+    bot._game = None
+    with patch("app.notifications.bot.send_message", return_value=555):
+        bot._handle_tictactoe()
+
+    assert bot._game == {"board": [" "] * 9, "message_id": 555}
+    bot._game = None
+
+
+def test_tictactoe_start_leaves_no_game_if_send_fails():
+    bot._game = None
+    with patch("app.notifications.bot.send_message", return_value=None):
+        bot._handle_tictactoe()
+    assert bot._game is None
+
+
+def test_ttt_move_without_active_game_is_gentle():
+    bot._game = None
+    with patch("app.notifications.bot.answer_callback_query") as ack:
+        bot._handle_ttt_move(0, "cb1")
+    assert "не запущена" in ack.call_args[0][1]
+
+
+def test_ttt_move_rejects_occupied_cell():
+    bot._game = {"board": ["X"] + [" "] * 8, "message_id": 1}
+    with patch("app.notifications.bot.answer_callback_query") as ack:
+        bot._handle_ttt_move(0, "cb1")
+    assert "занята" in ack.call_args[0][1]
+    bot._game = None
+
+
+def test_ttt_move_places_player_and_bot_replies():
+    bot._game = {"board": [" "] * 9, "message_id": 42}
+    with patch("app.notifications.bot.edit_message") as edit:
+        with patch("app.notifications.bot.answer_callback_query"):
+            bot._handle_ttt_move(0, "cb1")
+
+    board = bot._game["board"]
+    assert board[0] == "X"
+    assert board.count("O") == 1  # бот успел сходить в ответ
+    edit.assert_called_once()
+    assert edit.call_args[0][0] == 42
+    bot._game = None
+
+
+def test_ttt_move_ends_game_on_player_win():
+    # X X _ / O O _ / _ _ _  — четвёртый ход X в клетку 2 выигрывает сразу,
+    # бот сходить не успевает
+    bot._game = {"board": ["X", "X", " ", "O", "O", " ", " ", " ", " "], "message_id": 1}
+    with patch("app.notifications.bot.edit_message") as edit:
+        with patch("app.notifications.bot.answer_callback_query"):
+            bot._handle_ttt_move(2, "cb1")
+
+    assert bot._game is None
+    assert "выиграл" in edit.call_args[0][1]
+
+
+def test_handle_command_dispatches_tictactoe():
+    with patch("app.notifications.bot._handle_tictactoe") as h:
+        bot._handle_command("/tictactoe")
+    h.assert_called_once()
+
+
+def test_handle_callback_routes_ttt_move():
+    with patch("app.notifications.bot._handle_ttt_move") as h:
+        bot._handle_callback({"id": "cb1", "data": "ttt:4"})
+    h.assert_called_once_with(4, "cb1")
+
+
 # ── диспетчер команд ──
 
 

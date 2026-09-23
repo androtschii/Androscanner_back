@@ -24,15 +24,19 @@ def is_configured() -> bool:
     return bool(settings.telegram_bot_token and settings.telegram_chat_id)
 
 
-def send_message(text: str, reply_markup: dict | None = None) -> None:
+def send_message(text: str, reply_markup: dict | None = None) -> int | None:
     """Отправляет текст в чат. Ошибки только логируются — Telegram лежит
     или токен неверный не должны ронять запрос, который вызвал уведомление.
 
     reply_markup — inline-кнопки под сообщением (см. _keyboard в bot.py),
     например «📄 Отчёт #7» вместо необходимости набирать /report 7 руками.
+
+    Возвращает message_id отправленного сообщения (или None при ошибке/
+    неконфигурированном боте) — нужен, чтобы потом отредактировать это
+    же сообщение (см. edit_message, игра в крестики-нолики).
     """
     if not is_configured():
-        return
+        return None
 
     url = f"{API_BASE}/bot{settings.telegram_bot_token}/sendMessage"
     payload = {
@@ -43,9 +47,33 @@ def send_message(text: str, reply_markup: dict | None = None) -> None:
     if reply_markup:
         payload["reply_markup"] = reply_markup
     try:
-        httpx.post(url, json=payload, timeout=TIMEOUT)
+        r = httpx.post(url, json=payload, timeout=TIMEOUT)
+        return r.json().get("result", {}).get("message_id")
     except httpx.HTTPError as exc:
         logger.warning("Не удалось отправить уведомление в Telegram: %s", exc)
+        return None
+
+
+def edit_message(message_id: int, text: str, reply_markup: dict | None = None) -> None:
+    """Правит уже отправленное сообщение на месте — используется игрой
+    в крестики-нолики, чтобы поле обновлялось в том же сообщении,
+    а не заваливало чат новым на каждый ход.
+    """
+    if not is_configured():
+        return
+    url = f"{API_BASE}/bot{settings.telegram_bot_token}/editMessageText"
+    payload = {
+        "chat_id": settings.telegram_chat_id,
+        "message_id": message_id,
+        "text": text,
+        "parse_mode": "HTML",
+    }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+    try:
+        httpx.post(url, json=payload, timeout=TIMEOUT)
+    except httpx.HTTPError as exc:
+        logger.warning("Не удалось отредактировать сообщение в Telegram: %s", exc)
 
 
 def answer_callback_query(callback_query_id: str, text: str = "") -> None:

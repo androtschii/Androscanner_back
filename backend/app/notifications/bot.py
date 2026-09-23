@@ -27,11 +27,13 @@ from app.database import SessionLocal
 from app.models import AuditLog, Scan, ScanStatus
 from app.notifications.telegram import (
     answer_callback_query,
+    edit_message,
     is_configured,
     send_document,
     send_message,
     set_commands,
 )
+from app.notifications.tictactoe import BOT, EMPTY, PLAYER, bot_move, is_draw, new_board, winner
 from app.reports import ReportError, render_scan_report
 
 logger = logging.getLogger(__name__)
@@ -45,6 +47,7 @@ COMMANDS = [
     ("status", "последние сканы, с кнопками на отчёт"),
     ("report", "PDF-отчёт по номеру: /report 7"),
     ("ip", "текущий IP этой машины в сети"),
+    ("tictactoe", "крестики-нолики — чем заняться, пока идёт скан"),
     ("help", "список команд"),
 ]
 
@@ -52,7 +55,8 @@ HELP_TEXT = (
     "Доступные команды:\n"
     "/status — последние сканы\n"
     "/report &lt;id&gt; — PDF-отчёт по скану\n"
-    "/ip — текущий IP этой машины в сети"
+    "/ip — текущий IP этой машины в сети\n"
+    "/tictactoe — крестики-нолики, пока ждёшь скан"
 )
 
 
@@ -94,6 +98,69 @@ def _handle_ip() -> None:
         "Работает, только если фронтенд запущен с --host и телефон "
         "в той же сети."
     )
+
+
+# ── крестики-нолики ──
+#
+# Чем заняться, пока идёт долгий скан (vuln, full — минуты). Не имеет
+# отношения к сканеру; логика игры — в tictactoe.py, здесь только
+# Telegram-обвязка. Состояние партии держим в памяти процесса, а не в
+# БД: бот отвечает единственному chat_id, партия ровно одна и не должна
+# переживать перезапуск бэкенда — это не то, что стоит того, чтобы
+# тащить в базу.
+
+_game: dict | None = None  # {"board": list[str], "message_id": int}
+
+
+def _ttt_keyboard(board: list[str]) -> dict:
+    cells = [c if c != EMPTY else "·" for c in board]
+    rows = [
+        [{"text": cells[r * 3 + c], "callback_data": f"ttt:{r * 3 + c}"} for c in range(3)]
+        for r in range(3)
+    ]
+    return {"inline_keyboard": rows}
+
+
+def _ttt_status_text(board: list[str]) -> str:
+    w = winner(board)
+    if w == PLAYER:
+        return "🎉 Ты выиграл!"
+    if w == BOT:
+        return "🤖 Бот выиграл."
+    if is_draw(board):
+        return "Ничья."
+    return "Крестики-нолики — твой ход (X)."
+
+
+def _handle_tictactoe() -> None:
+    global _game
+    board = new_board()
+    message_id = send_message(_ttt_status_text(board), reply_markup=_ttt_keyboard(board))
+    _game = {"board": board, "message_id": message_id} if message_id else None
+
+
+def _handle_ttt_move(idx: int, callback_id: str) -> None:
+    global _game
+    if _game is None:
+        answer_callback_query(callback_id, "Игра не запущена — /tictactoe")
+        return
+
+    board = _game["board"]
+    if board[idx] != EMPTY:
+        answer_callback_query(callback_id, "Клетка уже занята")
+        return
+
+    board[idx] = PLAYER
+    if winner(board) is None and not is_draw(board):
+        move = bot_move(board)
+        if move is not None:
+            board[move] = BOT
+
+    over = winner(board) is not None or is_draw(board)
+    edit_message(_game["message_id"], _ttt_status_text(board), reply_markup=_ttt_keyboard(board))
+    answer_callback_query(callback_id)
+    if over:
+        _game = None
 
 
 def _format_status(scans: list[Scan]) -> str:
@@ -172,6 +239,8 @@ def _handle_command(text: str) -> None:
         _handle_report(arg)
     elif command == "/ip":
         _handle_ip()
+    elif command == "/tictactoe":
+        _handle_tictactoe()
     elif command in ("/start", "/help"):
         send_message(HELP_TEXT)
     else:
@@ -179,7 +248,8 @@ def _handle_command(text: str) -> None:
 
 
 def _handle_callback(callback_query: dict) -> None:
-    """Нажатие inline-кнопки под /status («📄 Отчёт #N»)."""
+    """Нажатие inline-кнопки: «📄 Отчёт #N» под /status или клетка поля
+    в крестиках-ноликах."""
     data = callback_query.get("data", "")
     callback_id = callback_query["id"]
 
@@ -187,6 +257,8 @@ def _handle_callback(callback_query: dict) -> None:
     if command == "report" and arg.isdigit():
         _handle_report(arg)
         answer_callback_query(callback_id)
+    elif command == "ttt" and arg.isdigit() and 0 <= int(arg) <= 8:
+        _handle_ttt_move(int(arg), callback_id)
     else:
         answer_callback_query(callback_id, text="Неизвестное действие")
 
