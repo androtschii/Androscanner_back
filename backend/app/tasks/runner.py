@@ -15,11 +15,12 @@ import uuid
 
 from fastapi import BackgroundTasks, HTTPException
 
+from app.analytics.diff import diff_results
 from app.config import settings
 from app.database import SessionLocal
 from app.models import Scan, ScanStatus
 from app.models.types import utcnow
-from app.notifications import notify_scan_finished
+from app.notifications import notify_anomaly_detected, notify_scan_finished
 from app.scanner import ScannerError, run_nmap_scan
 from app.tasks.celery_app import celery_app
 
@@ -73,6 +74,42 @@ def _finish(db, scan: Scan, status: ScanStatus, payload: dict) -> None:
     scan.result = json.dumps(payload, ensure_ascii=False)
     db.commit()
     notify_scan_finished(scan.target, status.value, payload.get("stats", {}).get("hosts_up"))
+    if status == ScanStatus.done:
+        _check_anomalies(db, scan, payload)
+
+
+def _check_anomalies(db, scan: Scan, payload: dict) -> None:
+    """Сравнивает свежий скан с предыдущим завершённым сканом той же цели
+    и уведомляет в Telegram, если появилось что-то новое.
+
+    Закрывшиеся порты и пропавшие хосты не считаются аномалией — они не
+    расширяют поверхность атаки, а nmap мог просто не застать временно
+    выключенное устройство. Шумели бы напрасно.
+    """
+    previous = (
+        db.query(Scan)
+        .filter(
+            Scan.target == scan.target,
+            Scan.status == ScanStatus.done,
+            Scan.result.isnot(None),
+            Scan.created_at < scan.created_at,
+            Scan.id != scan.id,
+        )
+        .order_by(Scan.created_at.desc())
+        .first()
+    )
+    if not previous or not previous.result:
+        return
+
+    try:
+        previous_data = json.loads(previous.result)
+    except json.JSONDecodeError:
+        return
+
+    diff = diff_results(previous_data, payload)
+    summary = diff["summary"]
+    if summary["hosts_added"] or summary["ports_opened"]:
+        notify_anomaly_detected(scan.target, summary)
 
 
 @celery_app.task(name="scan.run")

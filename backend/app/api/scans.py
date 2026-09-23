@@ -1,13 +1,16 @@
+import json
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
+from app.analytics.diff import diff_results
 from app.auth.deps import get_current_user, require_role
 from app.database import get_db
 from app.models import AuditLog, Role, Scan, ScanStatus, User
 from app.models.types import utcnow
 from app.notifications import notify_scan_finished, notify_scan_started
 from app.reports import ReportError, render_scan_report
-from app.schemas import Page, ScanCreate, ScanOut, ScanSummary
+from app.schemas import Page, ScanCreate, ScanDiff, ScanOut, ScanSummary
 from app.security.scope import assert_in_scope
 from app.tasks import dispatch_scan, revoke_scan_task
 
@@ -53,6 +56,48 @@ def get_scan(scan_id: int, db: Session = Depends(get_db), _: User = Depends(get_
     if not scan:
         raise HTTPException(status_code=404, detail="Не найден")
     return scan
+
+
+@router.get("/{scan_id}/changes", response_model=ScanDiff | None)
+def scan_changes(scan_id: int, db: Session = Depends(get_db), _: User = Depends(get_current_user)):
+    """Что изменилось относительно предыдущего завершённого скана той же
+    цели — тот же diff, что и на /analytics/diff, но пара сканов подбирается
+    автоматически, без ручного выбора. Возвращает null, если сравнивать не
+    с чем (первый скан цели) или сам скан ещё не завершён.
+    """
+    scan = db.get(Scan, scan_id)
+    if not scan:
+        raise HTTPException(status_code=404, detail="Не найден")
+    if scan.status != ScanStatus.done or not scan.result:
+        return None
+
+    previous = (
+        db.query(Scan)
+        .filter(
+            Scan.target == scan.target,
+            Scan.status == ScanStatus.done,
+            Scan.result.isnot(None),
+            Scan.created_at < scan.created_at,
+            Scan.id != scan.id,
+        )
+        .order_by(Scan.created_at.desc())
+        .first()
+    )
+    if not previous or not previous.result:
+        return None
+
+    try:
+        base_data = json.loads(previous.result)
+        compare_data = json.loads(scan.result)
+    except json.JSONDecodeError:
+        return None
+
+    return ScanDiff(
+        base=previous,
+        compare=scan,
+        targets_differ=False,
+        **diff_results(base_data, compare_data),
+    )
 
 
 @router.post(

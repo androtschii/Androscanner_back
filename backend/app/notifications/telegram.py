@@ -87,3 +87,16 @@ def notify_scan_finished(target: str, status: str, hosts_up: int | None = None) 
     icon = {"done": "✅", "failed": "❌", "cancelled": "⏹"}.get(status, "•")
     extra = f", живых хостов: {hosts_up}" if hosts_up is not None else ""
     send_message(f"{icon} Скан <code>{target}</code> завершён: {status}{extra}")
+
+
+def notify_anomaly_detected(target: str, summary: dict) -> None:
+    """Что-то новое появилось с прошлого скана той же цели — см.
+    app/tasks/runner.py::_check_anomalies. Не про закрывшиеся порты и
+    пропавшие хосты — те не расширяют поверхность атаки, шуметь ими незачем.
+    """
+    parts = []
+    if summary.get("hosts_added"):
+        parts.append(f"новых хостов: {summary['hosts_added']}")
+    if summary.get("ports_opened"):
+        parts.append(f"новых открытых портов: {summary['ports_opened']}")
+    send_message(f"⚠️ Изменения в сети <code>{target}</code> — {', '.join(parts)}")
